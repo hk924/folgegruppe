@@ -34,6 +34,35 @@ instruksjonene den gir deg for å pushe et eksisterende repo.
 4. Du får en adresse på formen folgegruppe.vercel.app. Den kan du
    dele direkte, eller koble til et eget domene under Settings, Domains.
 
+## Slik ser første gang ut
+
+Det finnes ingen egen oppsettskjerm. Appen sjekker én ting: har denne
+telefonen valgt en person? Hvis ikke, åpner den på Innstillinger:
+
+- **Er gruppa tom**, står det ett skjema der: legg til familien din. Den
+  som gjør det først blir administrator (`founderId`), og alle dagene i
+  terminen legges på dem til flere melder seg på. Terminen justeres rett
+  nedenfor, og lenken deles med resten.
+- **Er gruppa satt opp**, velger du navnet ditt fra lista. Står du ikke
+  der, fyller du ut skjemaet under lista og er med i rulleringen fra i dag.
+
+Resten av appen er åpen å se på imens, med en påminnelse øverst om å velge
+seg selv.
+
+Medlemsliste, termin og ny fordeling av dagene er administratorens
+innstillinger. Andre ser dem bak et ekstra trykk, ingenting er låst.
+
+Grupper som ble satt opp før dette har ingen administrator. Da er alle
+administrator, som før, og den som styrer gruppa kan ta rollen under
+Innstillinger, Deg.
+
+## Hvis appen sier "Får ikke tak i planen"
+
+Da er `SUPABASE_URL` og `SUPABASE_ANON_KEY` feil, eller tabellen mangler.
+Appen viser feilen i stedet for å se tom ut, og den lagrer ingenting så
+lenge den står slik, nettopp for å ikke skrive over planen som ligger der.
+Fiks punkt 1 over, deploy på nytt, og trykk "Prøv igjen".
+
 ## Etterpå
 
 Endringer i appen: rediger `index.html`, commit, push. Vercel deployer

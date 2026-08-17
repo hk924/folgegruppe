@@ -99,6 +99,10 @@ textarea{min-height:150px;line-height:1.5}
 .tabs button[aria-current="true"]{color:var(--ink);background:var(--chalk)}
 .tabs .ti{display:block;font-family:var(--display);font-size:16px;margin-bottom:1px}
 
+.hero{font-family:var(--display);font-size:30px;line-height:1.1;margin:8px 0 4px;letter-spacing:-.02em}
+.lede{color:var(--ink-soft);font-size:15px;margin:10px 0 0}
+.optional{font-weight:400;color:var(--ink-soft)}
+
 .people{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .people button{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:15px;color:var(--ink)}
 .people button:active{background:var(--chalk)}
@@ -128,33 +132,57 @@ a.btn{text-decoration:none;display:inline-flex}
 /* ====== PRODUKSJON: Supabase oppsett ======
    Fyll inn de to linjene under fra ditt Supabase prosjekt (Settings, API).
    Anon key er trygg å ha i klartekst her, den er laget for å ligge i frontend koden. */
-const SUPABASE_URL = "https://DITT-PROSJEKT.supabase.co";
-const SUPABASE_ANON_KEY = "din-anon-key-her";
+const SUPABASE_URL = "https://cdbazglchnghywskgiel.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkYmF6Z2xjaG5naHl3c2tnaWVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTA0MjMsImV4cCI6MjEwMjU2NjQyM30.0KUA4LWLbCV_IgcDfvnmXDuq28W3MEloEA-kQNOVfH0";
+
+/* Er de to linjene over ikke fylt ut, blir ingenting lagret. Da sier appen fra,
+   i stedet for å se tom ut hver gang den lastes. */
+const CONFIG_OK = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(SUPABASE_URL)
+  && SUPABASE_ANON_KEY.length > 40;
+const feil = (melding, art) => Object.assign(new Error(melding), art);
 
 let __storageReady = false;
 (async()=>{
+  const lokal = {
+    get(key){
+      const v = localStorage.getItem(key);
+      if(v===null) throw feil("tom", {tom:true});
+      return {key, value:v, shared:false};
+    },
+    set(key, value){ localStorage.setItem(key, value); return {key, value, shared:false}; },
+    del(key){ localStorage.removeItem(key); return {key, deleted:true, shared:false}; }
+  };
+  if(!CONFIG_OK){
+    console.error("Følgegruppa: SUPABASE_URL og SUPABASE_ANON_KEY er ikke fylt ut. Se README.");
+    window.storage = {
+      async get(key, shared){ if(shared) throw feil("mangler oppsett", {oppsett:true}); return lokal.get(key); },
+      async set(key, value, shared){ if(shared) throw feil("mangler oppsett", {oppsett:true}); return lokal.set(key, value); },
+      async delete(key, shared){ if(shared) throw feil("mangler oppsett", {oppsett:true}); return lokal.del(key); }
+    };
+    __storageReady = true;
+    document.dispatchEvent(new Event("storageready"));
+    return;
+  }
   const {createClient} = await import("https://esm.sh/@supabase/supabase-js@2");
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   window.storage = {
     async get(key, shared){
-      if(!shared){
-        const v = localStorage.getItem(key);
-        if(v===null) throw new Error("not found");
-        return {key, value:v, shared:false};
-      }
+      if(!shared) return lokal.get(key);
       const {data, error} = await supabase.from("app_kv").select("value").eq("key", key).maybeSingle();
-      if(error || !data) throw new Error("not found");
+      if(error) throw feil(error.message||"lesefeil", {nett:true});   // nede, eller blokkert av RLS
+      if(!data) throw feil("tom", {tom:true});                        // finnes ikke ennå, det er greit
       return {key, value:data.value, shared:true};
     },
     async set(key, value, shared){
-      if(!shared){ localStorage.setItem(key, value); return {key, value, shared:false}; }
+      if(!shared) return lokal.set(key, value);
       const {error} = await supabase.from("app_kv").upsert({key, value, updated_at:new Date().toISOString()});
-      if(error){ console.error(error); return null; }
+      if(error) throw feil(error.message||"skrivefeil", {nett:true});
       return {key, value, shared:true};
     },
     async delete(key, shared){
-      if(!shared){ localStorage.removeItem(key); return {key, deleted:true, shared:false}; }
-      await supabase.from("app_kv").delete().eq("key", key);
+      if(!shared) return lokal.del(key);
+      const {error} = await supabase.from("app_kv").delete().eq("key", key);
+      if(error) throw feil(error.message||"slettefeil", {nett:true});
       return {key, deleted:true, shared:true};
     }
   };
@@ -170,24 +198,35 @@ let __storageReady = false;
 /* ---------- lagring ---------- */
 const KEY="folgegruppe_v1", MEKEY="folgegruppe_meg";
 let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
+let ADMIN=false, LOADERR=null;
 
-const blank=()=>({v:1,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
+const blank=()=>({v:1,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
   skip:[{from:"2026-09-28",to:"2026-10-02",label:"Høstferie"}]},plan:{},log:[],checkins:{}});
 
+/* En tom base betyr "ingen har satt opp gruppa ennå". En feil betyr at vi ikke vet,
+   og da viser vi aldri et tomt oppsett, og skriver aldri over det som ligger der. */
+function feiltype(e){return e&&e.oppsett?"oppsett":"nett";}
 async function load(){
-  try{const r=await window.storage.get(KEY,true);DATA=r?JSON.parse(r.value):blank();}
-  catch(e){DATA=blank();}
-  try{const r=await window.storage.get(MEKEY,false);ME=r?JSON.parse(r.value).id:null;}
+  try{const r=await window.storage.get(KEY,true);DATA=JSON.parse(r.value);LOADERR=null;}
+  catch(e){
+    if(e&&e.tom){DATA=blank();LOADERR=null;}
+    else{DATA=DATA||blank();LOADERR=feiltype(e);}
+  }
+  try{const r=await window.storage.get(MEKEY,false);ME=JSON.parse(r.value).id;}
   catch(e){ME=null;}
 }
 async function save(){await window.storage.set(KEY,JSON.stringify(DATA),true);}
 async function mutate(fn){
   if(BUSY)return; BUSY=true;
+  let e2=null;
   try{
-    try{const r=await window.storage.get(KEY,true);if(r)DATA=JSON.parse(r.value);}catch(e){}
+    try{const r=await window.storage.get(KEY,true);DATA=JSON.parse(r.value);LOADERR=null;}
+    catch(e){if(!e||!e.tom)throw e;}       // tom base er greit, alt annet stopper oss
     fn(DATA); await save();
-  }catch(e){toast("Klarte ikke å lagre. Prøv igjen.");}
+  }catch(e){e2=e;LOADERR=feiltype(e);}
   BUSY=false; render();
+  if(e2)toast(e2.oppsett?"Appen mangler databasekobling, ingenting ble lagret."
+    :"Klarte ikke å lagre, ingenting er endret. Prøv igjen.");
 }
 async function setMe(id){ME=id;try{await window.storage.set(MEKEY,JSON.stringify({id}),false);}catch(e){}render();}
 
@@ -215,6 +254,8 @@ function mandag(s){const w=dow(s)||7;return add(s,1-w);}
 /* ---------- oppslag ---------- */
 const fam=id=>DATA.families.find(f=>f.id===id);
 function myFam(){return DATA.families.find(f=>f.members.some(m=>m.id===ME));}
+/* uten founderId (gamle data) er alle administratorer, ellers bare den som satte opp gruppa */
+function isFounder(){return !DATA.founderId||DATA.founderId===ME;}
 function meName(){const f=myFam();if(!f)return null;const m=f.members.find(m=>m.id===ME);return m?m.name:null;}
 function slot(dt){return DATA.plan[dt]||null;}
 function navn(dt){const p=slot(dt);if(!p||!p.familyId)return null;const f=fam(p.familyId);
@@ -462,9 +503,14 @@ function viewFordeling(){
 
 function viewInnst(){
   const t=DATA.term, myF=myFam();
+  if(needsMe())return '<div class="view">'+sheetHvemErDu()+omAppen()+"</div>";
   let h='<div class="view"><div class="sheet"><div class="eyebrow">Deg</div>'+
     '<p style="margin:10px 0 12px">Du er '+esc(meName()||"ikke valgt")+
-    (myF?", "+esc(myF.name):"")+'.</p><button class="btn ghost" data-act="switch">Bytt person</button></div>';
+    (myF?", "+esc(myF.name):"")+"."+(DATA.founderId&&DATA.founderId===ME?" Du satte opp gruppa, og er administrator.":"")+
+    '</p><button class="btn ghost" data-act="switch">Bytt person</button>'+
+    (!DATA.founderId?'<p class="hint" style="margin:14px 0 8px">Gruppa har ingen administrator ennå, så alle kan endre '+
+      'medlemsliste og termin. Er det du som styrer gruppa, kan du ta rollen her.</p>'+
+      '<button class="btn ghost" data-act="claim">Gjør meg til administrator</button>':"")+"</div>";
   if(myF){
     const inactive=myF.active===false;
     h+='<div class="sheet"><div class="eyebrow">Din familie</div>'+
@@ -477,6 +523,20 @@ function viewInnst(){
       '<button class="btn ghost" data-act="savecontact" style="margin-top:12px">Lagre familien</button>'+
       '<button class="btn ghost" data-act="'+(inactive?"activateon":"activateoff")+'" style="margin-top:8px">'+
       (inactive?"Meld familien på igjen":"Meld familien av")+"</button></div>";
+  }
+  if(isFounder()&&DATA.families.length===1){
+    h+='<div class="sheet"><div class="eyebrow">Neste steg</div>'+
+      '<p class="hint" style="margin:8px 0 12px">Du er alene i gruppa, så alle dagene står på deg. '+
+      'Del lenken med de andre foreldrene, de legger inn familien sin selv, og dagene fordeles på nytt med én gang. '+
+      'Sjekk gjerne terminen nedenfor først.</p>'+
+      '<button class="btn ghost" data-act="copylink">Kopier lenken til appen</button></div>';
+  }
+  if(!isFounder()&&!ADMIN){
+    h+='<div class="sheet"><div class="eyebrow">Administrator</div>'+
+      '<p class="hint" style="margin:8px 0 12px">Medlemsliste, termin og fordeling av dagene styres av den som satte opp gruppa. '+
+      'Trenger du å endre det likevel, kan du åpne det her, men si fra i gruppa først.</p>'+
+      '<button class="btn ghost" data-act="showadmin">Vis innstillinger for hele gruppa</button></div>';
+    return h+omAppen()+"</div>";
   }
   h+='<div class="sheet"><div class="eyebrow">Medlemmer</div>'+
     '<p class="hint" style="margin:8px 0 0">En linje per familie. Familienavn, kolon, navn skilt med komma. Dette legger til nye familier og oppdaterer navn, det fjerner aldri noen. Skal en familie ut av rulleringen, gjør de det selv under Din familie.</p>'+
@@ -494,45 +554,79 @@ function viewInnst(){
   h+='<div class="sheet"><div class="eyebrow">Sett opp planen</div>'+
     '<p class="hint" style="margin:8px 0 12px">Fordeler dagene fra i dag og fremover på nytt, tilfeldig, mellom familiene som er med nå. Dager som er passert rører den ikke. Dette overskriver bytter og avmeldinger fremover.</p>'+
     '<button class="btn" data-act="gen">Fordel dagene på nytt</button></div>';
-  h+='<div class="sheet"><div class="eyebrow">Om appen</div><p class="hint" style="margin-top:8px">'+
-    'Alle i gruppa ser og endrer samme plan. Ingen innlogging, så vær litt varsom: endre bare dine egne dager. '+
-    'Trykk på tittelen øverst for å hente inn siste versjon.</p></div>';
-  return h+"</div>";
+  return h+omAppen()+"</div>";
 }
 
-function viewSetup(){
-  return '<div class="view"><div class="sheet"><div class="eyebrow">Kom i gang</div>'+
-    '<h2 style="font-family:var(--display);font-size:26px;margin:8px 0 6px">Legg inn familiene</h2>'+
-    wobble(280)+
-    '<p style="color:var(--ink-soft);font-size:14px">En linje per familie: familienavn, kolon, og navnene skilt med komma. '+
-    'Rulleringen går på familie, ikke person, så hver familie får én dag og avgjør selv hvem som går.</p>'+
-    '<textarea id="fams" spellcheck="false" placeholder="Hansen: Kari, Ola&#10;Berg: Nina, Jonas&#10;Lie: Sara"></textarea>'+
-    '<button class="btn" data-act="savefams" style="margin-top:12px">Lagre og fordel dagene</button></div></div>';
+/* ---------- hvem er du ---------- */
+/* Én sperre: har denne telefonen valgt en person? Hvis ikke, står dette øverst
+   i Innstillinger, og appen ellers er åpen å se på. */
+function needsMe(){return !ME||!myFam();}
+
+function omAppen(){
+  return '<div class="sheet"><div class="eyebrow">Om appen</div><p class="hint" style="margin-top:8px">'+
+    'Alle i gruppa ser og endrer samme plan. Ingen innlogging, s\u00e5 v\u00e6r litt varsom: endre bare dine egne dager. '+
+    'Trykk p\u00e5 tittelen \u00f8verst for \u00e5 hente inn siste versjon.</p></div>';
 }
 
-function viewWho(){
-  let h='<div class="view"><div class="sheet"><div class="eyebrow">Hvem er du?</div>'+
-    '<p style="color:var(--ink-soft);font-size:14px;margin:8px 0 0">Velges én gang på denne telefonen.</p><div class="people">';
-  DATA.families.forEach(f=>{h+='<div class="fam">'+esc(f.name)+(f.active===false?" (ikke med nå)":"")+"</div>";
+function skjemaFamilie(knapp){
+  return '<label for="newfamname">Familienavn</label><input id="newfamname" placeholder="Hansen">'+
+    '<label for="newmyname">Ditt navn</label><input id="newmyname" placeholder="Kari">'+
+    '<label for="newphone">Telefon <span class="optional">(valgfritt)</span></label>'+
+    '<input id="newphone" placeholder="91234567" inputmode="tel">'+
+    '<label for="newkids">Barn, kommaseparert <span class="optional">(valgfritt)</span></label>'+
+    '<input id="newkids" placeholder="Emma, Noah">'+
+    '<button class="btn" data-act="joinnew" style="margin-top:14px">'+knapp+'</button>';
+}
+
+function sheetHvemErDu(){
+  if(!DATA.families.length){
+    return '<div class="sheet"><div class="eyebrow">Kom i gang</div>'+
+      '<h2 class="hero" style="font-size:26px">Legg til familien din</h2>'+wobble(260)+
+      '<p class="lede">Ingen har satt opp gruppa enn\u00e5. Du er f\u00f8rst ute, s\u00e5 du blir administrator. '+
+      'Etterp\u00e5 deler du lenken, og de andre legger inn familien sin selv.</p>'+
+      skjemaFamilie('Opprett gruppa')+"</div>";
+  }
+  const antF=DATA.families.length;
+  let h='<div class="sheet"><div class="eyebrow">Hvem er du?</div>'+
+    '<h2 class="hero" style="font-size:26px">Finn navnet ditt</h2>'+
+    '<p class="lede">Gruppa har '+antF+(antF===1?" familie":" familier")+
+    '. Velg deg selv, det gj\u00f8res \u00e9n gang p\u00e5 denne telefonen.</p><div class="people">';
+  DATA.families.forEach(f=>{h+='<div class="fam">'+esc(f.name)+(f.active===false?" (ikke med n\u00e5)":"")+"</div>";
     f.members.forEach(m=>{h+='<button data-act="me" data-id="'+m.id+'">'+esc(m.name)+"</button>";});});
   h+="</div></div>";
-  h+='<div class="sheet"><div class="eyebrow">Familien din er ikke i listen</div>'+
-    '<p class="hint" style="margin:8px 0 12px">Meld deg på selv, du blir lagt inn i rulleringen fra i dag.</p>'+
-    '<label for="newfamname">Familienavn</label><input id="newfamname" placeholder="Hansen">'+
-    '<label for="newmyname">Ditt navn</label><input id="newmyname" placeholder="Kari">'+
-    '<button class="btn ghost" data-act="joinnew" style="margin-top:12px">Meld på familien</button></div>';
-  return h+"</div>";
+  h+='<div class="sheet"><div class="eyebrow">St\u00e5r du ikke p\u00e5 lista?</div>'+
+    '<p class="hint" style="margin:8px 0 4px">Legg inn familien din her. Du kommer med i rulleringen fra i dag, '+
+    'og de andre ser deg med \u00e9n gang.</p>'+
+    skjemaFamilie("Meld p\u00e5 familien")+"</div>";
+  return h;
+}
+
+function bannerHvemErDu(){
+  return '<div class="banner">Du har ikke sagt hvem du er, s\u00e5 appen vet ikke hvilke dager som er dine. '+
+    '<button class="btn ghost row" data-act="tab" data-t="innst" style="margin-top:10px">Velg deg selv</button></div>';
+}
+
+function viewFeil(){
+  const oppsett=LOADERR==="oppsett";
+  return '<div class="view"><div class="sheet"><div class="eyebrow">Ingen kontakt med planen</div>'+
+    '<h2 class="hero" style="font-size:26px">'+(oppsett?"Appen mangler database":"F\u00e5r ikke tak i planen")+"</h2>"+
+    '<p class="lede">'+(oppsett
+      ? "SUPABASE_URL og SUPABASE_ANON_KEY er ikke fylt ut i index.html, s\u00e5 ingenting kan lagres eller deles. "+
+        "Se punkt 1 i README, legg inn de to verdiene, og deploy p\u00e5 nytt."
+      : "Planen ligger trygt lagret, men appen n\u00e5r den ikke akkurat n\u00e5. Sjekk nettet og pr\u00f8v igjen. "+
+        "Ingenting blir endret s\u00e5 lenge dette vises.")+"</p>"+
+    '<button class="btn" data-act="reload" style="margin-top:18px">Pr\u00f8v igjen</button></div></div>';
 }
 
 const TABS=[["hjem","Din dag","D"],["henting","Henting","H"],["kalender","Kalender","K"],["fordeling","Fordeling","F"],["innst","Innstillinger","I"]];
 function render(){
   const app=document.getElementById("app"), tabs=document.getElementById("tabs");
   let body;
-  if(!DATA.families.length){body=viewSetup();tabs.hidden=true;}
-  else if(!ME||!myFam()){body=viewWho();tabs.hidden=true;}
+  if(LOADERR){body=viewFeil();tabs.hidden=true;}
   else{
     tabs.hidden=false;
-    body={hjem:viewHjem,henting:viewHenting,kalender:viewKalender,fordeling:viewFordeling,innst:viewInnst}[TAB]();
+    body=(needsMe()&&TAB!=="innst"?bannerHvemErDu():"")+
+      {hjem:viewHjem,henting:viewHenting,kalender:viewKalender,fordeling:viewFordeling,innst:viewInnst}[TAB]();
     tabs.innerHTML=TABS.map(([id,label,ic])=>'<button data-act="tab" data-t="'+id+'" aria-current="'+(TAB===id)+'">'+
       '<span class="ti" aria-hidden="true">'+ic+"</span>"+label+"</button>").join("");
   }
@@ -550,6 +644,18 @@ function parseFams(txt){
     return {id:nid("f"),name,members:(mem.length?mem:[name]).map(n=>({id:nid("m"),name:n}))};
   });
 }
+function parseSkip(txt){
+  return (txt||"").split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
+    const m=l.match(/(\d{4}-\d{2}-\d{2})\s*(?:til|-|–)\s*(\d{4}-\d{2}-\d{2})\s*:?\s*(.*)/);
+    return m?{from:m[1],to:m[2],label:m[3]||"Fri"}:null;}).filter(Boolean);
+}
+function parseKids(txt,prev){
+  const prevKids=prev||[];
+  return (txt||"").split(",").map(s=>s.trim()).filter(Boolean).map(n=>{
+    const ex=prevKids.find(k=>k.name.trim().toLowerCase()===n.toLowerCase());
+    return ex?{...ex,name:n}:{id:nid("k"),name:n};
+  });
+}
 function ukeTekst(){
   const start=add(mandag(today()),WEEKOFF*7);
   let out="Følgegruppa, uke "+uke(start)+":\n";
@@ -564,8 +670,18 @@ document.addEventListener("click",async e=>{
   const a=b.dataset.act;
   if(a==="tab"){TAB=b.dataset.t;WEEKOFF=0;render();window.scrollTo(0,0);return;}
   if(a==="week"){WEEKOFF+=+b.dataset.v;render();return;}
-  if(a==="me"){setMe(b.dataset.id);return;}
-  if(a==="switch"){ME=null;try{await window.storage.delete(MEKEY,false);}catch(err){}render();return;}
+  if(a==="me"){setMe(b.dataset.id);TAB="hjem";return;}
+  if(a==="switch"){ME=null;TAB="innst";try{await window.storage.delete(MEKEY,false);}catch(err){}
+    render();window.scrollTo(0,0);return;}
+  if(a==="showadmin"){ADMIN=true;render();window.scrollTo(0,0);return;}
+  if(a==="claim"){
+    if(!ME)return;
+    const nm=meName();
+    await mutate(s=>{if(s.founderId)return;s.founderId=ME;s.log.unshift({ts:Date.now(),text:nm+" ble administrator"});});
+    toast(DATA.founderId===ME?"Du er administrator n\u00e5":"Noen andre tok rollen f\u00f8rst");return;}
+  if(a==="copylink"){
+    try{await navigator.clipboard.writeText(location.href);toast("Lenken er kopiert");}
+    catch(err){toast(location.href);}return;}
   if(a==="reload"){await load();render();toast("Oppdatert");return;}
   if(a==="copy"){try{await navigator.clipboard.writeText(ukeTekst());toast("Ukeplanen er kopiert");}
     catch(err){toast(ukeTekst());}return;}
@@ -595,15 +711,24 @@ document.addEventListener("click",async e=>{
   if(a==="joinnew"){
     const famName=document.getElementById("newfamname").value.trim();
     const myName=document.getElementById("newmyname").value.trim();
-    if(!famName||!myName){toast("Fyll ut begge feltene");return;}
-    let newId;
+    const phoneEl=document.getElementById("newphone"), kidsEl=document.getElementById("newkids");
+    const phone=phoneEl?phoneEl.value.trim():"", kids=parseKids(kidsEl?kidsEl.value:"");
+    if(!famName||!myName){toast("Fyll inn familienavn og navnet ditt");return;}
+    const dublett=DATA.families.find(f=>f.name.trim().toLowerCase()===famName.toLowerCase());
+    if(dublett&&!b.dataset.sure){
+      b.dataset.sure="1";b.textContent=famName+" finnes alt. Trykk igjen for å legge til likevel";return;}
+    let newId, forst=false;
     await mutate(s=>{
       newId=nid("m");
-      s.families.push({id:nid("f"),name:famName,active:true,phone:"",kids:[],members:[{id:newId,name:myName}]});
-      regenFuture(s,famName+" meldte seg på");
+      s.families.push({id:nid("f"),name:famName,active:true,phone,kids,members:[{id:newId,name:myName}]});
+      if(!s.founderId){s.founderId=newId;forst=true;}   // den første som melder seg på, styrer gruppa
+      regenFuture(s,famName+(forst?" satte opp gruppa":" meldte seg på"));
     });
+    if(LOADERR)return;                                   // ingenting ble lagret, ikke lås oss til en id som ikke finnes
+    TAB="hjem";
     await setMe(newId);
-    toast("Velkommen. Du er lagt inn i rulleringen fra i dag.");return;}
+    toast(forst?"Gruppa er opprettet. Del lenken med de andre."
+      :"Velkommen. Du er lagt inn i rulleringen fra i dag.");return;}
   if(a==="activateoff"){
     const fid=myFam().id;
     await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=false;regenFuture(s,f.name+" ble meldt av");});
@@ -617,19 +742,14 @@ document.addEventListener("click",async e=>{
     const phone=document.getElementById("famphone").value.trim();
     const kidsRaw=document.getElementById("famkids").value;
     const prevKids=myFam().kids||[];
-    const kids=kidsRaw.split(",").map(s=>s.trim()).filter(Boolean).map(n=>{
-      const ex=prevKids.find(k=>k.name.trim().toLowerCase()===n.toLowerCase());
-      return ex?{...ex,name:n}:{id:nid("k"),name:n};
-    });
+    const kids=parseKids(kidsRaw,prevKids);
     await mutate(s=>{const ff=s.families.find(x=>x.id===fid);if(!ff)return;ff.phone=phone;ff.kids=kids;});
     toast("Familien er oppdatert");return;}
   if(a==="saveterm"){
     const start=document.getElementById("ts").value, end=document.getElementById("te").value;
     const meetTime=document.getElementById("mt").value||"08:15";
     if(!start||!end||start>end){toast("Sjekk datoene");return;}
-    const skip=document.getElementById("skip").value.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
-      const m=l.match(/(\d{4}-\d{2}-\d{2})\s*(?:til|-|–)\s*(\d{4}-\d{2}-\d{2})\s*:?\s*(.*)/);
-      return m?{from:m[1],to:m[2],label:m[3]||"Fri"}:null;}).filter(Boolean);
+    const skip=parseSkip(document.getElementById("skip").value);
     await mutate(s=>{s.term={start,end,meetTime,skip};generer(s);});
     toast("Terminen er lagret og dagene fordelt");return;}
   if(a==="hday"){HDAY=add(HDAY||today(),+b.dataset.v);render();return;}
@@ -671,7 +791,9 @@ document.addEventListener("click",async e=>{
 
 (async()=>{
   if(!__storageReady){await new Promise(r=>document.addEventListener("storageready",r,{once:true}));}
-  await load();render();
+  await load();
+  if(needsMe())TAB="innst";   // ikke valgt person på denne telefonen, start der man ordner det
+  render();
 })();
 setInterval(async()=>{if(document.visibilityState==="visible"&&!BUSY&&TAB!=="innst"){
   try{const r=await window.storage.get(KEY,true);if(r){const n=JSON.parse(r.value);
