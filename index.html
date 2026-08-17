@@ -254,6 +254,10 @@ function mandag(s){const w=dow(s)||7;return add(s,1-w);}
 /* ---------- oppslag ---------- */
 const fam=id=>DATA.families.find(f=>f.id===id);
 function myFam(){return DATA.families.find(f=>f.members.some(m=>m.id===ME));}
+/* En husstand heter det barnet den følger, ikke et etternavn. name er bare et ekko av barna. */
+function husnavn(f){if(!f)return "";const k=(f.kids||[]).map(x=>x.name.trim()).filter(Boolean);
+  return k.length?k.join(" og "):(f.name||"");}
+function husnokkel(f){return husnavn(f).toLowerCase();}
 /* uten founderId (gamle data) er alle administratorer, ellers bare den som satte opp gruppa */
 function isFounder(){return !DATA.founderId||DATA.founderId===ME;}
 function meName(){const f=myFam();if(!f)return null;const m=f.members.find(m=>m.id===ME);return m?m.name:null;}
@@ -369,8 +373,8 @@ function dayRow(dt,ctx){
     if(open)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'">Jeg tar den</button>';
     else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'">Kan ikke</button>';
   }
-  const who=open?"Ingen satt opp":(esc(family?family.name:"")+
-    '<small>'+esc(navn(dt)||"")+(p.original&&fam(p.original)?" dekker for "+esc(fam(p.original).name):"")+"</small>");
+  const who=open?"Ingen satt opp":(esc(husnavn(family))+
+    '<small>'+esc(navn(dt)||"")+(p.original&&fam(p.original)?" dekker for "+esc(husnavn(fam(p.original))):"")+"</small>");
   const call=(!past&&!mine&&family&&ctx!=="flat")?callBtns(family.phone):"";
   return '<div class="day'+(mine?" mine":"")+(open?" open":"")+'" style="'+(past?"opacity:.45":"")+'">'+
     '<div class="dt"><b>'+esc(DAGK[dow(dt)])+" "+d(dt).getUTCDate()+'.</b>'+MND[d(dt).getUTCMonth()].slice(0,3)+'</div>'+
@@ -388,7 +392,7 @@ function viewHjem(){
     const dif=Math.round((d(nx)-d(today()))/864e5);
     h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(300)+
       '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+
-      ", uke "+uke(nx)+". Oppført: "+esc(f?f.name:"")+" ("+esc(navn(nx)||"")+")</div>"+
+      ", uke "+uke(nx)+". Oppført: "+esc(navn(nx)||"")+(husnavn(f)?", med "+esc(husnavn(f)):"")+"</div>"+
       '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'">Kan ikke denne dagen</button>'+
       '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">Legg i kalender</button>'+
       '<button class="btn ghost row" data-act="icsall">Legg alle mine dager</button></div>';
@@ -434,7 +438,7 @@ function viewHenting(){
   kids.forEach(k=>{
     const st=ci[k.id]||"", kfam=fam(k.familyId);
     h+='<div class="kid'+(st==="away"?" away":"")+'"><div class="name">'+esc(k.name)+
-      '<span class="famname">'+esc(kfam?kfam.name:"")+'</span></div>'+
+      '<span class="famname">'+esc(kfam?kfam.members.map(m=>m.name).join(" / "):"")+'</span></div>'+
       '<div class="btnrow" style="margin-top:8px">'+
       '<button class="btn ghost row'+(st==="here"?" here":"")+'" data-act="here" data-d="'+dt+'" data-k="'+k.id+'">'+
       (st==="here"?"Hentet":"Merk hentet")+'</button>'+
@@ -479,7 +483,7 @@ function viewFordeling(){
   let h='<div class="view"><div class="sheet"><div class="eyebrow">Dager per familie</div>'+
     '<p class="hint" style="margin:8px 0 16px">Teller hele terminen, etter bytter.</p><table><thead><tr>'+
     '<th>Familie</th><th class="num">Dager</th><th class="num">Avmeldt</th><th class="num">Tatt for andre</th></tr></thead><tbody>';
-  rows.forEach(r=>{h+='<tr><td>'+esc(r.f.name)+(mineF&&mineF.id===r.f.id?" (din)":"")+(r.f.active===false?" (ikke med nå)":"")+
+  rows.forEach(r=>{h+='<tr><td>'+esc(husnavn(r.f))+(mineF&&mineF.id===r.f.id?" (din)":"")+(r.f.active===false?" (ikke med nå)":"")+
     '<div class="bar" style="width:'+Math.round(r.n/max*100)+'%;margin-top:6px"></div></td>'+
     '<td class="num">'+r.n+'</td><td class="num">'+r.dropped+'</td><td class="num">'+r.cover+"</td></tr>";});
   h+="</tbody></table>";
@@ -488,7 +492,7 @@ function viewFordeling(){
   const withPhone=DATA.families.filter(f=>phones(f.phone).length);
   if(withPhone.length){
     h+='<div class="sheet"><div class="eyebrow">Kontakter</div>';
-    withPhone.forEach(f=>{h+='<div class="day"><div class="who">'+esc(f.name)+
+    withPhone.forEach(f=>{h+='<div class="day"><div class="who">'+esc(husnavn(f))+
       '<small>'+esc(f.members.map(m=>m.name).join(" og "))+'</small></div>'+callBtns(f.phone)+"</div>";});
     h+="</div>";
   }
@@ -506,7 +510,7 @@ function viewInnst(){
   if(needsMe())return '<div class="view">'+sheetHvemErDu()+omAppen()+"</div>";
   let h='<div class="view"><div class="sheet"><div class="eyebrow">Deg</div>'+
     '<p style="margin:10px 0 12px">Du er '+esc(meName()||"ikke valgt")+
-    (myF?", "+esc(myF.name):"")+"."+(DATA.founderId&&DATA.founderId===ME?" Du satte opp gruppa, og er administrator.":"")+
+    (myF?", "+esc(husnavn(myF)):"")+"."+(DATA.founderId&&DATA.founderId===ME?" Du satte opp gruppa, og er administrator.":"")+
     '</p><button class="btn ghost" data-act="switch">Bytt person</button>'+
     (!DATA.founderId?'<p class="hint" style="margin:14px 0 8px">Gruppa har ingen administrator ennå, så alle kan endre '+
       'medlemsliste og termin. Er det du som styrer gruppa, kan du ta rollen her.</p>'+
@@ -515,11 +519,12 @@ function viewInnst(){
     const inactive=myF.active===false;
     h+='<div class="sheet"><div class="eyebrow">Din familie</div>'+
       (inactive?'<div class="banner" style="margin:10px 0 14px">Familien er meldt av. Ingen nye dager blir lagt på deg.</div>':"")+
-      '<p class="hint" style="margin:8px 0 12px">Telefon og barn brukes til å ringe om noen ikke dukker opp, og til hentemodus. Kun du kan endre dette for din familie.</p>'+
+      '<p class="hint" style="margin:8px 0 12px">Barna er navnet på din plass i rulleringen, og de dukker opp i hentemodus. '+
+      'Telefonen brukes til å ringe deg om noe skjer. Kun du kan endre dette.</p>'+
+      '<label for="famkids">Barnas fornavn (kommaseparert)</label>'+
+      '<input id="famkids" value="'+esc((myF.kids||[]).map(k=>k.name).join(", "))+'" placeholder="Elliot">'+
       '<label for="famphone">Telefon (kan være flere, kommaseparert)</label>'+
       '<input id="famphone" value="'+esc(myF.phone||"")+'" placeholder="91234567" inputmode="tel">'+
-      '<label for="famkids">Barn (kommaseparert)</label>'+
-      '<input id="famkids" value="'+esc((myF.kids||[]).map(k=>k.name).join(", "))+'" placeholder="Emma, Noah">'+
       '<button class="btn ghost" data-act="savecontact" style="margin-top:12px">Lagre familien</button>'+
       '<button class="btn ghost" data-act="'+(inactive?"activateon":"activateoff")+'" style="margin-top:8px">'+
       (inactive?"Meld familien på igjen":"Meld familien av")+"</button></div>";
@@ -538,10 +543,14 @@ function viewInnst(){
       '<button class="btn ghost" data-act="showadmin">Vis innstillinger for hele gruppa</button></div>';
     return h+omAppen()+"</div>";
   }
-  h+='<div class="sheet"><div class="eyebrow">Medlemmer</div>'+
-    '<p class="hint" style="margin:8px 0 0">En linje per familie. Familienavn, kolon, navn skilt med komma. Dette legger til nye familier og oppdaterer navn, det fjerner aldri noen. Skal en familie ut av rulleringen, gjør de det selv under Din familie.</p>'+
-    '<textarea id="fams" spellcheck="false">'+esc(DATA.families.map(f=>f.name+": "+f.members.map(m=>m.name).join(", ")).join("\n"))+"</textarea>"+
-    '<button class="btn ghost" data-act="savefams" style="margin-top:10px">Lagre medlemmer</button></div>';
+  h+='<div class="sheet"><div class="eyebrow">Hvem er med</div>'+
+    '<p class="hint" style="margin:8px 0 0">En linje per barn: <strong>barnets fornavn, kolon, de voksne</strong>. '+
+    'Som <em>Elliot: Hallgeir, Rachel</em>. Har en familie to barn i gruppa, skriv <em>Ida og Leo: Kari</em> på én linje, '+
+    'de går som én husstand. Dette legger til og oppdaterer, det fjerner aldri noen. '+
+    'Skal noen ut av rulleringen, gjør de det selv under Din familie.</p>'+
+    '<textarea id="fams" spellcheck="false">'+
+    esc(DATA.families.map(f=>husnavn(f)+": "+f.members.map(m=>m.name).join(", ")).join("\n"))+"</textarea>"+
+    '<button class="btn ghost" data-act="savefams" style="margin-top:10px">Lagre lista</button></div>';
   h+='<div class="sheet"><div class="eyebrow">Termin</div><div class="two"><div><label for="ts">Første dag</label>'+
     '<input type="date" id="ts" value="'+t.start+'"></div><div><label for="te">Siste dag</label>'+
     '<input type="date" id="te" value="'+t.end+'"></div></div>'+
@@ -569,35 +578,37 @@ function omAppen(){
 }
 
 function skjemaFamilie(knapp){
-  return '<label for="newfamname">Familienavn</label><input id="newfamname" placeholder="Hansen">'+
-    '<label for="newmyname">Ditt navn</label><input id="newmyname" placeholder="Kari">'+
+  return '<label for="newkids">Barnets fornavn</label>'+
+    '<input id="newkids" placeholder="Elliot">'+
+    '<p class="hint">Har du flere barn i gruppa, skriv dem med komma.</p>'+
+    '<label for="newmyname">Ditt fornavn</label><input id="newmyname" placeholder="Hallgeir">'+
+    '<label for="newpartner">Den andre voksne <span class="optional">(valgfritt)</span></label>'+
+    '<input id="newpartner" placeholder="Rachel">'+
     '<label for="newphone">Telefon <span class="optional">(valgfritt)</span></label>'+
     '<input id="newphone" placeholder="91234567" inputmode="tel">'+
-    '<label for="newkids">Barn, kommaseparert <span class="optional">(valgfritt)</span></label>'+
-    '<input id="newkids" placeholder="Emma, Noah">'+
     '<button class="btn" data-act="joinnew" style="margin-top:14px">'+knapp+'</button>';
 }
 
 function sheetHvemErDu(){
   if(!DATA.families.length){
     return '<div class="sheet"><div class="eyebrow">Kom i gang</div>'+
-      '<h2 class="hero" style="font-size:26px">Legg til familien din</h2>'+wobble(260)+
+      '<h2 class="hero" style="font-size:26px">Legg til deg og barnet ditt</h2>'+wobble(260)+
       '<p class="lede">Ingen har satt opp gruppa enn\u00e5. Du er f\u00f8rst ute, s\u00e5 du blir administrator. '+
-      'Etterp\u00e5 deler du lenken, og de andre legger inn familien sin selv.</p>'+
-      skjemaFamilie('Opprett gruppa')+"</div>";
+      'Etterp\u00e5 deler du lenken, og de andre legger seg til selv.</p>'+
+      skjemaFamilie("Opprett gruppa")+"</div>";
   }
-  const antF=DATA.families.length;
   let h='<div class="sheet"><div class="eyebrow">Hvem er du?</div>'+
-    '<h2 class="hero" style="font-size:26px">Finn navnet ditt</h2>'+
-    '<p class="lede">Gruppa har '+antF+(antF===1?" familie":" familier")+
-    '. Velg deg selv, det gj\u00f8res \u00e9n gang p\u00e5 denne telefonen.</p><div class="people">';
-  DATA.families.forEach(f=>{h+='<div class="fam">'+esc(f.name)+(f.active===false?" (ikke med n\u00e5)":"")+"</div>";
+    '<h2 class="hero" style="font-size:26px">Velg deg selv</h2>'+
+    '<p class="lede">Det gj\u00f8res \u00e9n gang p\u00e5 denne telefonen. St\u00e5r du ikke her, legger du deg til nedenfor.</p>'+
+    '<div class="people">';
+  DATA.families.forEach(f=>{h+='<div class="fam">'+esc(husnavn(f))+(f.active===false?" (ikke med n\u00e5)":"")+"</div>";
     f.members.forEach(m=>{h+='<button data-act="me" data-id="'+m.id+'">'+esc(m.name)+"</button>";});});
   h+="</div></div>";
-  h+='<div class="sheet"><div class="eyebrow">St\u00e5r du ikke p\u00e5 lista?</div>'+
-    '<p class="hint" style="margin:8px 0 4px">Legg inn familien din her. Du kommer med i rulleringen fra i dag, '+
-    'og de andre ser deg med \u00e9n gang.</p>'+
-    skjemaFamilie("Meld p\u00e5 familien")+"</div>";
+  h+='<div class="sheet"><div class="eyebrow">Ikke p\u00e5 lista?</div>'+
+    '<h2 class="hero" style="font-size:22px">Legg deg til</h2>'+
+    '<p class="lede" style="font-size:14px">St\u00e5r barnet ditt alt p\u00e5 lista, blir du lagt til som voksen der, '+
+    'ikke som en ny familie. Du kommer med i rulleringen fra i dag.</p>'+
+    skjemaFamilie("Legg meg til")+"</div>";
   return h;
 }
 
@@ -635,14 +646,17 @@ function render(){
 }
 
 /* ---------- handlinger ---------- */
-function parseFams(txt){
-  return txt.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
+/* En linje er "barn: voksne". Flere barn i samme husstand skilles med komma eller "og". */
+function parseHus(txt){
+  return (txt||"").split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
     const i=l.indexOf(":");
-    const name=i>0?l.slice(0,i).trim():l.trim();
-    const rest=i>0?l.slice(i+1):"";
-    const mem=rest.split(/,| og /).map(s=>s.trim()).filter(Boolean);
-    return {id:nid("f"),name,members:(mem.length?mem:[name]).map(n=>({id:nid("m"),name:n}))};
-  });
+    const venstre=i>0?l.slice(0,i):l, hoyre=i>0?l.slice(i+1):"";
+    const barn=venstre.split(/,| og /).map(s=>s.trim()).filter(Boolean);
+    const voksne=hoyre.split(/,| og /).map(s=>s.trim()).filter(Boolean);
+    if(!barn.length)return null;
+    return {barn:barn.map(n=>({id:nid("k"),name:n})),
+      voksne:(voksne.length?voksne:barn).map(n=>({id:nid("m"),name:n}))};
+  }).filter(Boolean);
 }
 function parseSkip(txt){
   return (txt||"").split("\n").map(l=>l.trim()).filter(Boolean).map(l=>{
@@ -686,56 +700,74 @@ document.addEventListener("click",async e=>{
   if(a==="copy"){try{await navigator.clipboard.writeText(ukeTekst());toast("Ukeplanen er kopiert");}
     catch(err){toast(ukeTekst());}return;}
   if(a==="savefams"){
-    const txt=document.getElementById("fams").value;
-    const list=parseFams(txt);
-    if(!list.length){toast("Skriv inn minst én familie");return;}
+    const list=parseHus(document.getElementById("fams").value);
+    if(!list.length){toast("Skriv inn minst \u00e9n linje");return;}
     const fresh=!DATA.families.length;
-    const keepMe=meName();
+    const keepMe=ME;
     await mutate(s=>{
-      const byName={};s.families.forEach(f=>{byName[f.name.trim().toLowerCase()]=f;});
+      const finn={};s.families.forEach(f=>{finn[husnokkel(f)]=f;});
       list.forEach(nf=>{
-        const prev=byName[nf.name.trim().toLowerCase()];
+        const prev=finn[nf.barn.map(k=>k.name).join(" og ").toLowerCase()];
         if(prev){
-          prev.members=nf.members.map(m=>{
+          prev.kids=nf.barn.map(k=>{
+            const pk=(prev.kids||[]).find(x=>x.name.trim().toLowerCase()===k.name.toLowerCase());
+            return pk?{...pk,name:k.name}:k;
+          });
+          prev.name=husnavn(prev);
+          prev.members=nf.voksne.map(m=>{
             const pm=(prev.members||[]).find(x=>x.name.trim().toLowerCase()===m.name.trim().toLowerCase());
             return pm?{...pm,name:m.name}:m;
           });
         }else{
-          s.families.push({id:nf.id,name:nf.name,active:true,phone:"",kids:[],members:nf.members});
+          s.families.push({id:nid("f"),name:nf.barn.map(k=>k.name).join(" og "),active:true,
+            phone:"",kids:nf.barn,members:nf.voksne});
         }
       });
-      if(fresh){generer(s);}else{regenFuture(s,"Medlemslisten ble oppdatert");}
+      if(fresh){generer(s);}else{regenFuture(s,"Lista ble oppdatert");}
     });
-    if(keepMe){const m=DATA.families.flatMap(f=>f.members).find(x=>x.name===keepMe);if(m)setMe(m.id);else setMe(null);}
+    if(keepMe&&!DATA.families.some(f=>f.members.some(m=>m.id===keepMe)))setMe(null);
     toast(fresh?"Klar. Velg hvem du er.":"Lagt til eller oppdatert. Ingen ble fjernet.");return;}
   if(a==="joinnew"){
-    const famName=document.getElementById("newfamname").value.trim();
-    const myName=document.getElementById("newmyname").value.trim();
-    const phoneEl=document.getElementById("newphone"), kidsEl=document.getElementById("newkids");
-    const phone=phoneEl?phoneEl.value.trim():"", kids=parseKids(kidsEl?kidsEl.value:"");
-    if(!famName||!myName){toast("Fyll inn familienavn og navnet ditt");return;}
-    const dublett=DATA.families.find(f=>f.name.trim().toLowerCase()===famName.toLowerCase());
-    if(dublett&&!b.dataset.sure){
-      b.dataset.sure="1";b.textContent=famName+" finnes alt. Trykk igjen for å legge til likevel";return;}
-    let newId, forst=false;
+    const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
+    const myName=g("newmyname"), partner=g("newpartner"), phone=g("newphone");
+    const barn=parseKids(g("newkids"));
+    if(!barn.length||!myName){toast("Fyll inn barnets fornavn og ditt fornavn");return;}
+    const nokkel=barn.map(k=>k.name).join(" og ").toLowerCase();
+    const finnes=DATA.families.find(f=>husnokkel(f)===nokkel);
+    let newId, forst=false, blePart=false;
     await mutate(s=>{
       newId=nid("m");
-      s.families.push({id:nid("f"),name:famName,active:true,phone,kids,members:[{id:newId,name:myName}]});
-      if(!s.founderId){s.founderId=newId;forst=true;}   // den første som melder seg på, styrer gruppa
-      regenFuture(s,famName+(forst?" satte opp gruppa":" meldte seg på"));
+      const meg={id:newId,name:myName};
+      const eks=s.families.find(f=>husnokkel(f)===nokkel);
+      if(eks){                                  // barnet st\u00e5r der alt, da er du en voksen til i den husstanden
+        blePart=true;
+        if(!eks.members.some(m=>m.name.trim().toLowerCase()===myName.toLowerCase()))eks.members.push(meg);
+        else newId=eks.members.find(m=>m.name.trim().toLowerCase()===myName.toLowerCase()).id;
+        if(partner&&!eks.members.some(m=>m.name.trim().toLowerCase()===partner.toLowerCase()))
+          eks.members.push({id:nid("m"),name:partner});
+        if(phone)eks.phone=phone;
+        if(!s.founderId){s.founderId=newId;forst=true;}
+        return;
+      }
+      const voksne=[meg];
+      if(partner)voksne.push({id:nid("m"),name:partner});
+      s.families.push({id:nid("f"),name:barn.map(k=>k.name).join(" og "),active:true,phone,kids:barn,members:voksne});
+      if(!s.founderId){s.founderId=newId;forst=true;}   // den f\u00f8rste som legger seg til, styrer gruppa
+      regenFuture(s,barn.map(k=>k.name).join(" og ")+(forst?" satte opp gruppa":" ble lagt til"));
     });
-    if(LOADERR)return;                                   // ingenting ble lagret, ikke lås oss til en id som ikke finnes
+    if(LOADERR)return;                                   // ingenting ble lagret, ikke l\u00e5s oss til en id som ikke finnes
     TAB="hjem";
     await setMe(newId);
-    toast(forst?"Gruppa er opprettet. Del lenken med de andre."
-      :"Velkommen. Du er lagt inn i rulleringen fra i dag.");return;}
+    toast(blePart?"Du er lagt til som voksen hos "+barn.map(k=>k.name).join(" og ")
+      :forst?"Gruppa er opprettet. Del lenken med de andre."
+      :"Velkommen. Du er med i rulleringen fra i dag.");return;}
   if(a==="activateoff"){
     const fid=myFam().id;
-    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=false;regenFuture(s,f.name+" ble meldt av");});
+    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=false;regenFuture(s,husnavn(f)+" ble meldt av");});
     toast("Familien er meldt av. Fremtidige dager er fordelt på de andre.");return;}
   if(a==="activateon"){
     const fid=myFam().id;
-    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=true;regenFuture(s,f.name+" ble meldt på igjen");});
+    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=true;regenFuture(s,husnavn(f)+" ble meldt på igjen");});
     toast("Velkommen tilbake i rulleringen.");return;}
   if(a==="savecontact"){
     const fid=myFam().id;
@@ -743,8 +775,9 @@ document.addEventListener("click",async e=>{
     const kidsRaw=document.getElementById("famkids").value;
     const prevKids=myFam().kids||[];
     const kids=parseKids(kidsRaw,prevKids);
-    await mutate(s=>{const ff=s.families.find(x=>x.id===fid);if(!ff)return;ff.phone=phone;ff.kids=kids;});
-    toast("Familien er oppdatert");return;}
+    await mutate(s=>{const ff=s.families.find(x=>x.id===fid);if(!ff)return;
+      ff.phone=phone;ff.kids=kids;if(kids.length)ff.name=kids.map(k=>k.name).join(" og ");});
+    toast("Lagret");return;}
   if(a==="saveterm"){
     const start=document.getElementById("ts").value, end=document.getElementById("te").value;
     const meetTime=document.getElementById("mt").value||"08:15";
@@ -780,12 +813,12 @@ document.addEventListener("click",async e=>{
     await mutate(s=>{const p=s.plan[dt];if(!p||!p.familyId)return;
       const f=s.families.find(x=>x.id===p.familyId);
       p.original=p.original||p.familyId;p.familyId=null;
-      s.log.unshift({ts:Date.now(),text:(f?f.name:"Noen")+" kan ikke "+lang(dt)});});
+      s.log.unshift({ts:Date.now(),text:(f?husnavn(f):"Noen")+" kan ikke "+lang(dt)});});
     toast("Meldt fra. Dagen ligger nå som ledig.");return;}
   if(a==="take"){
     const dt=b.dataset.d, f=myFam();if(!f)return;
     await mutate(s=>{const p=s.plan[dt];if(!p||p.familyId)return;
-      p.familyId=f.id;s.log.unshift({ts:Date.now(),text:f.name+" tar "+lang(dt)});});
+      p.familyId=f.id;s.log.unshift({ts:Date.now(),text:husnavn(f)+" tar "+lang(dt)});});
     toast("Du står nå oppført "+lang(dt));return;}
 });
 
