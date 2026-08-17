@@ -53,6 +53,8 @@ a{color:var(--kobolt)}
 .btn.warn{background:var(--rust);border-color:var(--rust);color:#fff}
 .btn.row{display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:42px;padding:8px 14px;font-size:14px}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.ico{width:15px;height:15px;flex:0 0 auto;margin-right:7px;fill:none;stroke:currentColor;
+  stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
 .chain{width:100%;height:104px;display:block;margin:6px 0 2px}
 .weekhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -322,6 +324,11 @@ function toast(t){const el=document.createElement("div");el.className="toast";el
   document.body.appendChild(el);setTimeout(()=>el.remove(),2600);}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* lite kalenderikon til knappene som lager .ics */
+const kalIkon='<svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'+
+  '<rect x="2.2" y="3.6" width="11.6" height="10.6" rx="2.4"/>'+
+  '<path d="M2.2 7.1h11.6M5.6 2v3.1M10.4 2v3.1"/></svg>';
+
 function wobble(w){ // hånd tegnet strek
   let p="M 2 6";for(let x=2;x<=w;x+=Math.max(10,w/14)){p+=" Q "+(x+6)+" "+(6+(x/14%2<1?-4:4))+" "+(x+12)+" 6";}
   return '<svg class="underline" viewBox="0 0 '+(w+14)+' 12" preserveAspectRatio="none" aria-hidden="true"><path d="'+p+
@@ -371,7 +378,7 @@ function dayRow(dt,ctx){
   let act="";
   if(!past&&ctx!=="flat"){
     if(open)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'">Jeg tar den</button>';
-    else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'">Kan ikke</button>';
+    else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'">Vil bytte</button>';
   }
   const who=open?"Ingen satt opp":(esc(husnavn(family))+
     '<small>'+esc(navn(dt)||"")+(p.original&&fam(p.original)?" dekker for "+esc(husnavn(fam(p.original))):"")+"</small>");
@@ -393,9 +400,9 @@ function viewHjem(){
     h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(300)+
       '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+
       ", uke "+uke(nx)+". Oppført: "+esc(navn(nx)||"")+(husnavn(f)?", med "+esc(husnavn(f)):"")+"</div>"+
-      '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'">Kan ikke denne dagen</button>'+
-      '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">Legg i kalender</button>'+
-      '<button class="btn ghost row" data-act="icsall">Legg alle mine dager</button></div>';
+      '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'">Vil bytte denne dagen</button>'+
+      '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">'+kalIkon+'Legg i kalender</button>'+
+      '<button class="btn ghost row" data-act="icsall">'+kalIkon+'Legg alle mine dager</button></div>';
   }else{
     h+='<div class="bigdate none">Ingen dager igjen på deg</div><div class="countdown">Du står ikke oppført på flere dager denne terminen.</div>';
   }
@@ -813,8 +820,8 @@ document.addEventListener("click",async e=>{
     await mutate(s=>{const p=s.plan[dt];if(!p||!p.familyId)return;
       const f=s.families.find(x=>x.id===p.familyId);
       p.original=p.original||p.familyId;p.familyId=null;
-      s.log.unshift({ts:Date.now(),text:(f?husnavn(f):"Noen")+" kan ikke "+lang(dt)});});
-    toast("Meldt fra. Dagen ligger nå som ledig.");return;}
+      s.log.unshift({ts:Date.now(),text:(f?husnavn(f):"Noen")+" vil bytte bort "+lang(dt)});});
+    toast("Dagen er lagt ut for bytte. Nå kan andre ta den.");return;}
   if(a==="take"){
     const dt=b.dataset.d, f=myFam();if(!f)return;
     await mutate(s=>{const p=s.plan[dt];if(!p||p.familyId)return;
