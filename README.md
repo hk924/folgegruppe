@@ -39,12 +39,18 @@ instruksjonene den gir deg for å pushe et eksisterende repo.
 Det finnes ingen egen oppsettskjerm. Appen sjekker én ting: har denne
 telefonen valgt en person? Hvis ikke, åpner den på Innstillinger:
 
-- **Er gruppa tom**, står det ett skjema der: legg til familien din. Den
+- **Er gruppa tom**, står det ett skjema der: barnets fornavn, ditt
+  fornavn, den andre voksne og telefon. Ingen etternavn noe sted. Den
   som gjør det først blir administrator (`founderId`), og alle dagene i
   terminen legges på dem til flere melder seg på. Terminen justeres rett
   nedenfor, og lenken deles med resten.
 - **Er gruppa satt opp**, velger du navnet ditt fra lista. Står du ikke
   der, fyller du ut skjemaet under lista og er med i rulleringen fra i dag.
+  Står barnet ditt alt på lista, blir du lagt til som voksen i den
+  husstanden i stedet for at det opprettes en ny.
+
+En husstand heter barnet sitt, ikke et etternavn. Rulleringen går på
+husstand, så to barn i samme familie skrives på én linje: `Ida og Leo: Kari`.
 
 Resten av appen er åpen å se på imens, med en påminnelse øverst om å velge
 seg selv.
