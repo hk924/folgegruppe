@@ -56,7 +56,7 @@ a{color:var(--kobolt)}
 .ico{width:15px;height:15px;flex:0 0 auto;margin-right:7px;fill:none;stroke:currentColor;
   stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
-.chain{width:100%;height:104px;display:block;margin:6px 0 2px}
+.chain{width:100%;height:118px;display:block;margin:6px 0 2px}
 .weekhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .weeknav{background:none;border:1px solid var(--line);border-radius:9px;width:34px;height:34px;color:var(--ink);font-size:16px;line-height:1}
 .legend{display:flex;gap:14px;font-size:11px;color:var(--ink-soft);flex-wrap:wrap;margin-top:4px}
@@ -73,7 +73,10 @@ a{color:var(--kobolt)}
 .day .who{flex:1;min-width:0;font-size:15px}
 .day .who small{display:block;font-size:12px;color:var(--ink-soft)}
 .day.mine{background:rgba(216,162,43,.13);border-radius:10px;padding-left:10px;padding-right:10px}
-.day.open .who{color:var(--rust)}
+.slots{flex:1;min-width:0}
+.slot{display:flex;align-items:center;gap:10px;min-width:0}
+.slot+.slot{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.slot.open .who{color:var(--rust)}
 .tag{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;border:1px solid var(--line);color:var(--ink-soft);white-space:nowrap}
 .tag.you{background:var(--oker);border-color:var(--oker);color:#3A2A00}
 .tag.open{background:#fff;border-color:var(--rust);color:var(--rust)}
@@ -202,14 +205,31 @@ const KEY="folgegruppe_v1", MEKEY="folgegruppe_meg";
 let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
 let ADMIN=false, LOADERR=null;
 
-const blank=()=>({v:1,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
-  skip:[{from:"2026-09-28",to:"2026-10-02",label:"Høstferie"}]},plan:{},log:[],checkins:{}});
+const blank=()=>({v:2,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
+  perDay:2,skip:[{from:"2026-09-28",to:"2026-10-02",label:"Høstferie"}]},plan:{},log:[],checkins:{}});
+
+/* En dag hadde før én familie: {familyId, original}. Nå har den en plass per voksen som skal gå:
+   {slots:[{familyId, original}, ...]}. Gamle dager løftes opp til én plass, og perDay som mangler
+   betyr én, slik at gamle data oppfører seg som før til noen endrer innstillingen. */
+function normaliser(s){
+  if(!s.term)s.term=blank().term;
+  if(!s.term.perDay)s.term.perDay=1;
+  Object.keys(s.plan||{}).forEach(dt=>{
+    const p=s.plan[dt];if(!p)return;
+    if(!Array.isArray(p.slots)){
+      const en={familyId:p.familyId||null};
+      if(p.original)en.original=p.original;
+      s.plan[dt]={slots:[en]};
+    }
+  });
+  return s;
+}
 
 /* En tom base betyr "ingen har satt opp gruppa ennå". En feil betyr at vi ikke vet,
    og da viser vi aldri et tomt oppsett, og skriver aldri over det som ligger der. */
 function feiltype(e){return e&&e.oppsett?"oppsett":"nett";}
 async function load(){
-  try{const r=await window.storage.get(KEY,true);DATA=JSON.parse(r.value);LOADERR=null;}
+  try{const r=await window.storage.get(KEY,true);DATA=normaliser(JSON.parse(r.value));LOADERR=null;}
   catch(e){
     if(e&&e.tom){DATA=blank();LOADERR=null;}
     else{DATA=DATA||blank();LOADERR=feiltype(e);}
@@ -222,7 +242,7 @@ async function mutate(fn){
   if(BUSY)return; BUSY=true;
   let e2=null;
   try{
-    try{const r=await window.storage.get(KEY,true);DATA=JSON.parse(r.value);LOADERR=null;}
+    try{const r=await window.storage.get(KEY,true);DATA=normaliser(JSON.parse(r.value));LOADERR=null;}
     catch(e){if(!e||!e.tom)throw e;}       // tom base er greit, alt annet stopper oss
     fn(DATA); await save();
   }catch(e){e2=e;LOADERR=feiltype(e);}
@@ -263,11 +283,18 @@ function husnokkel(f){return husnavn(f).toLowerCase();}
 /* uten founderId (gamle data) er alle administratorer, ellers bare den som satte opp gruppa */
 function isFounder(){return !DATA.founderId||DATA.founderId===ME;}
 function meName(){const f=myFam();if(!f)return null;const m=f.members.find(m=>m.id===ME);return m?m.name:null;}
+const perDag=()=>Math.max(1,DATA.term.perDay||1);
 function slot(dt){return DATA.plan[dt]||null;}
-function navn(dt){const p=slot(dt);if(!p||!p.familyId)return null;const f=fam(p.familyId);
-  return f?f.members.map(m=>m.name.split(" ")[0]).join(" / "):null;}
-function isMine(dt){const p=slot(dt),f=myFam();return !!(p&&f&&p.familyId===f.id);}
-function openDays(){return skoledager().filter(dt=>dt>=today()&&slot(dt)&&!slot(dt).familyId);}
+function plasser(dt){const p=slot(dt);return p&&p.slots?p.slots:[];}
+function plassHus(dt){return plasser(dt).map(s=>s.familyId?fam(s.familyId):null);}
+function voksne(f){return f?f.members.map(m=>m.name.split(" ")[0]).join(" / "):"";}
+/* kort etikett for dagen: husstandene som går, skilt med pluss */
+function navn(dt){const l=plassHus(dt).filter(Boolean).map(husnavn);return l.length?l.join(" + "):null;}
+function isMine(dt){const f=myFam();return !!f&&plasser(dt).some(s=>s.familyId===f.id);}
+function minPlass(dt){const f=myFam();if(!f)return -1;return plasser(dt).findIndex(s=>s.familyId===f.id);}
+function ledige(dt){return plasser(dt).filter(s=>!s.familyId).length;}
+function medMeg(dt){const f=myFam();return plassHus(dt).filter(x=>x&&(!f||x.id!==f.id));}
+function openDays(){return skoledager().filter(dt=>dt>=today()&&ledige(dt)>0);}
 function myNext(){return skoledager().find(dt=>dt>=today()&&isMine(dt))||null;}
 const nid=p=>p+Math.random().toString(36).slice(2,8);
 function phones(str){return (str||"").split(",").map(s=>s.trim()).filter(Boolean);}
@@ -285,6 +312,11 @@ function icsEvent(dt,title,desc){
   return ["BEGIN:VEVENT","UID:"+dt+"-"+nid("e")+"@folgegruppa","DTSTART:"+f(start),"DTEND:"+f(end),
     "SUMMARY:"+title,"DESCRIPTION:"+(desc||""),"BEGIN:VALARM","TRIGGER:-PT15M","ACTION:DISPLAY",
     "DESCRIPTION:Påminnelse","END:VALARM","END:VEVENT"].join("\r\n");
+}
+function icsMed(dt){
+  const andre=medMeg(dt);
+  return (andre.length?"Sammen med "+andre.map(x=>husnavn(x)+" ("+voksne(x)+")").join(" og ")+". ":"")+
+    (ledige(dt)?"Én plass står ledig. ":"")+"Husk å levere barna ved Steinerskolen.";
 }
 function downloadICS(filename,events){
   const body=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Følgegruppa//NO","CALSCALE:GREGORIAN",
@@ -307,8 +339,22 @@ function applyFuture(state,reshuffle){
     activeIds.forEach(id=>{if(!order.includes(id))order.push(id);});
   }
   state.order=order;
+  const n=Math.max(1,state.term.perDay||1);
   const days=skoledager().filter(dt=>dt>=today());
-  days.forEach((dt,i)=>{state.plan[dt]={familyId:order[i%order.length]};});
+  let c=0;
+  days.forEach(dt=>{
+    const slots=[], brukt={};
+    for(let j=0;j<n;j++){
+      let valgt=null;
+      for(let k=0;k<order.length;k++){                     // aldri samme husstand to ganger samme dag
+        const id=order[(c+k)%order.length];
+        if(!brukt[id]){valgt=id;c=(c+k+1)%order.length;break;}
+      }
+      if(valgt)brukt[valgt]=1;                             // er det færre husstander enn plasser, står resten ledig
+      slots.push({familyId:valgt||null});
+    }
+    state.plan[dt]={slots};
+  });
 }
 function generer(state){
   applyFuture(state,true);
@@ -343,64 +389,87 @@ function chain(){
   let nodes="";
   days.forEach((dt,i)=>{
     const cx=x0+gap*i, f=ferie(dt), inTerm=dt>=DATA.term.start&&dt<=DATA.term.end&&!f;
-    const p=slot(dt), mine=isMine(dt), open=p&&!p.familyId;
+    const ps=plasser(dt), mine=isMine(dt), led=ledige(dt), noenFylt=ps.some(x=>x.familyId);
     let c;
-    if(!inTerm||!p) c='<circle cx="'+cx+'" cy="'+y+'" r="4" fill="var(--line)"/>';
-    else if(open) c='<circle cx="'+cx+'" cy="'+y+'" r="11" fill="#fff" stroke="var(--rust)" stroke-width="2.5" stroke-dasharray="4 3"/>';
-    else if(mine) c='<circle cx="'+cx+'" cy="'+y+'" r="13" fill="var(--oker)"/><circle cx="'+cx+'" cy="'+y+'" r="16.5" fill="none" stroke="var(--oker)" stroke-width="1.5" opacity=".45"/>';
-    else c='<circle cx="'+cx+'" cy="'+y+'" r="11" fill="var(--kobolt)"/>';
-    const nm=f?f.label:(navn(dt)||(inTerm?"ingen":""));
+    if(!inTerm||!ps.length) c='<circle cx="'+cx+'" cy="'+y+'" r="4" fill="var(--line)"/>';
+    else if(!noenFylt) c='<circle cx="'+cx+'" cy="'+y+'" r="11" fill="#fff" stroke="var(--rust)" stroke-width="2.5" stroke-dasharray="4 3"/>';
+    else{
+      c=mine
+        ? '<circle cx="'+cx+'" cy="'+y+'" r="13" fill="var(--oker)"/><circle cx="'+cx+'" cy="'+y+'" r="16.5" fill="none" stroke="var(--oker)" stroke-width="1.5" opacity=".45"/>'
+        : '<circle cx="'+cx+'" cy="'+y+'" r="11" fill="var(--kobolt)"/>';
+      if(led)c+='<circle cx="'+cx+'" cy="'+y+'" r="17" fill="none" stroke="var(--rust)" stroke-width="2" stroke-dasharray="4 3"/>';
+    }
+    const kort2=t=>t.length>11?t.slice(0,10)+"…":t;
+    const etiketter=f?[f.label]:(ps.length?ps.map(x=>x.familyId?husnavn(fam(x.familyId)):"mangler"):(inTerm?["ingen"]:[]));
     nodes+=c+'<text x="'+cx+'" y="'+(y+30)+'" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--ink)">'+
       esc(DAGK[dow(dt)])+" "+d(dt).getUTCDate()+'.</text>'+
-      '<text x="'+cx+'" y="'+(y+43)+'" text-anchor="middle" font-size="9.5" fill="var(--ink-soft)">'+
-      esc(nm.length>13?nm.slice(0,12)+"…":nm)+'</text>';
+      etiketter.slice(0,3).map((t,j)=>'<text x="'+cx+'" y="'+(y+42+j*11)+'" text-anchor="middle" font-size="9.5" fill="'+
+        (t==="mangler"?"var(--rust)":"var(--ink-soft)")+'">'+esc(kort2(t))+"</text>").join("");
   });
   return '<div class="weekhead"><button class="weeknav" data-act="week" data-v="-1" aria-label="Forrige uke">&#8249;</button>'+
     '<div class="eyebrow">Uke '+uke(start)+(WEEKOFF===0?" (denne uka)":"")+'</div>'+
     '<button class="weeknav" data-act="week" data-v="1" aria-label="Neste uke">&#8250;</button></div>'+
-    '<svg class="chain" viewBox="0 0 '+W+' 92" aria-hidden="true"><path d="'+path+
+    '<svg class="chain" viewBox="0 0 '+W+' 104" aria-hidden="true"><path d="'+path+
     '" fill="none" stroke="var(--ink)" stroke-opacity=".2" stroke-width="2" stroke-linecap="round"/>'+nodes+'</svg>'+
     '<div class="legend"><span><i class="dot" style="background:var(--oker)"></i>din familie</span>'+
     '<span><i class="dot" style="background:var(--kobolt)"></i>dekket</span>'+
-    '<span><i class="dot" style="background:#fff;border:2px solid var(--rust)"></i>mangler folk</span></div>';
+    '<span><i class="dot" style="background:#fff;border:2px solid var(--rust)"></i>mangler en voksen</span></div>';
 }
 
 function dayRow(dt,ctx){
-  const p=slot(dt), f=ferie(dt);
+  const f=ferie(dt);
   if(f)return '<div class="holiday">'+esc(f.label)+", "+kort(dt)+"</div>";
-  if(!p)return "";
-  const mine=isMine(dt), open=!p.familyId, family=p.familyId?fam(p.familyId):null;
-  const past=dt<today();
-  let tag="";
-  if(open)tag='<span class="tag open">mangler</span>';
-  else if(mine)tag='<span class="tag you">deg</span>';
-  else if(p.original)tag='<span class="tag">byttet</span>';
-  let act="";
-  if(!past&&ctx!=="flat"){
-    if(open)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'">Jeg tar den</button>';
-    else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'">Vil bytte</button>';
-  }
-  const who=open?"Ingen satt opp":(esc(husnavn(family))+
-    '<small>'+esc(navn(dt)||"")+(p.original&&fam(p.original)?" dekker for "+esc(husnavn(fam(p.original))):"")+"</small>");
-  const call=(!past&&!mine&&family&&ctx!=="flat")?callBtns(family.phone):"";
-  return '<div class="day'+(mine?" mine":"")+(open?" open":"")+'" style="'+(past?"opacity:.45":"")+'">'+
+  const ps=plasser(dt);
+  if(!ps.length)return "";
+  const past=dt<today(), minF=myFam();
+  const linjer=ps.map((sl,i)=>{
+    const family=sl.familyId?fam(sl.familyId):null;
+    const mine=!!(minF&&family&&family.id===minF.id);
+    let tag="";
+    if(!family)tag='<span class="tag open">mangler</span>';
+    else if(mine)tag='<span class="tag you">deg</span>';
+    else if(sl.original&&sl.original!==family.id)tag='<span class="tag">byttet</span>';
+    let act="";
+    if(!past&&ctx!=="flat"){
+      if(!family)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'" data-i="'+i+'">Jeg tar den</button>';
+      else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'" data-i="'+i+'">Vil bytte</button>';
+    }
+    const who=family
+      ? esc(husnavn(family))+'<small>'+esc(voksne(family))+
+        (sl.original&&sl.original!==family.id&&fam(sl.original)?" dekker for "+esc(husnavn(fam(sl.original))):"")+"</small>"
+      : "Mangler en voksen"+(sl.original&&fam(sl.original)
+          ?'<small>'+esc(husnavn(fam(sl.original)))+" vil bytte</small>":"");
+    const call=(!past&&!mine&&family&&ctx!=="flat")?callBtns(family.phone):"";
+    return '<div class="slot'+(family?"":" open")+'"><div class="who">'+who+"</div>"+tag+call+act+"</div>";
+  }).join("");
+  return '<div class="day'+(isMine(dt)?" mine":"")+(ledige(dt)?" open":"")+'" style="'+(past?"opacity:.45":"")+'">'+
     '<div class="dt"><b>'+esc(DAGK[dow(dt)])+" "+d(dt).getUTCDate()+'.</b>'+MND[d(dt).getUTCMonth()].slice(0,3)+'</div>'+
-    '<div class="who">'+who+'</div>'+tag+call+act+'</div>';
+    '<div class="slots">'+linjer+"</div></div>";
 }
 
 /* ---------- skjermer ---------- */
 function viewHjem(){
   const nx=myNext(), open=openDays(), f=myFam();
   let h='<div class="view">';
-  if(open.length)h+='<div class="banner"><strong>'+open.length+(open.length===1?" dag":" dager")+
-    ' mangler folk.</strong> Se lista nedenfor hvis du kan ta en av dem.</div>';
+  if(open.length){
+    const mangler=open.reduce((n,dt)=>n+ledige(dt),0);
+    h+='<div class="banner"><strong>'+mangler+" ledig"+(mangler===1?" plass":"e plasser")+" på "+
+      open.length+(open.length===1?" dag":" dager")+'.</strong> Se lista nedenfor hvis du kan ta en av dem.</div>';
+  }
   h+='<div class="sheet"><div class="eyebrow">Din neste dag</div>';
   if(nx){
     const dif=Math.round((d(nx)-d(today()))/864e5);
     h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(300)+
       '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+
-      ", uke "+uke(nx)+". Oppført: "+esc(navn(nx)||"")+(husnavn(f)?", med "+esc(husnavn(f)):"")+"</div>"+
-      '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'">Vil bytte denne dagen</button>'+
+      ", uke "+uke(nx)+". Du går for "+esc(husnavn(f))+".</div>"+
+      (medMeg(nx).length
+        ? '<p style="margin:-6px 0 14px;font-size:14px">Sammen med <strong>'+
+          esc(medMeg(nx).map(husnavn).join(" og "))+"</strong> ("+esc(medMeg(nx).map(voksne).join(", "))+")"+
+          (ledige(nx)?", og én plass står ledig":"")+".</p>"+
+          '<div class="btnrow" style="margin-bottom:10px">'+medMeg(nx).map(x=>callBtns(x.phone)).join("")+"</div>"
+        : ledige(nx)?'<p style="margin:-6px 0 14px;font-size:14px;color:var(--rust)">Ingen går sammen med deg ennå, '+
+            ledige(nx)+" plass"+(ledige(nx)===1?"":"er")+" står ledig.</p>":"")+
+      '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'" data-i="'+minPlass(nx)+'">Vil bytte denne dagen</button>'+
       '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">'+kalIkon+'Legg i kalender</button>'+
       '<button class="btn ghost row" data-act="icsall">'+kalIkon+'Legg alle mine dager</button></div>';
   }else{
@@ -408,7 +477,7 @@ function viewHjem(){
   }
   h+="</div>";
   h+='<div class="sheet">'+chain()+"</div>";
-  h+='<div class="sheet"><div class="eyebrow">Ledige dager</div>';
+  h+='<div class="sheet"><div class="eyebrow">Ledige plasser</div>';
   h+=open.length?open.map(dt=>dayRow(dt)).join(""):'<div class="center">Alle dager er dekket.</div>';
   h+="</div>";
   const mine=skoledager().filter(dt=>dt>=today()&&isMine(dt));
@@ -428,10 +497,12 @@ function viewHenting(){
     h+='<p class="center">'+(f?esc(f.label):"Ingen følgegruppe denne dagen")+"</p></div></div>";
     return h;
   }
-  const p=slot(dt), duty=p&&p.familyId?fam(p.familyId):null;
+  const duty=plassHus(dt).filter(Boolean), led=ledige(dt);
   h+='<p style="margin:10px 0 0;font-size:14px;color:var(--ink-soft)">På tur: '+
-    (duty?esc(duty.name)+" ("+esc(navn(dt)||"")+")":"Ingen satt opp")+"</p>";
-  if(duty&&phones(duty.phone).length)h+='<div class="btnrow" style="margin-top:8px">'+callBtns(duty.phone)+"</div>";
+    (duty.length?duty.map(x=>esc(husnavn(x))+" ("+esc(voksne(x))+")").join(" + "):"Ingen satt opp")+
+    (led?'<span style="color:var(--rust)"> · mangler '+led+" voksen"+(led===1?"":"e")+"</span>":"")+"</p>";
+  const tlf=duty.map(x=>callBtns(x.phone)).join("");
+  if(tlf)h+='<div class="btnrow" style="margin-top:8px">'+tlf+"</div>";
   h+="</div>";
   const kids=allKids();
   if(!kids.length){
@@ -480,9 +551,9 @@ function viewFordeling(){
   const days=skoledager();
   const rows=DATA.families.map(f=>{
     let n=0,dropped=0,cover=0;
-    days.forEach(dt=>{const p=slot(dt);if(!p)return;
-      if(p.familyId===f.id){n++;if(p.original&&p.original!==f.id)cover++;}
-      if(p.original===f.id&&p.familyId!==f.id)dropped++;});
+    days.forEach(dt=>{plasser(dt).forEach(sl=>{
+      if(sl.familyId===f.id){n++;if(sl.original&&sl.original!==f.id)cover++;}
+      if(sl.original===f.id&&sl.familyId!==f.id)dropped++;});});
     return {f,n,dropped,cover};
   }).sort((a,b)=>b.n-a.n);
   const max=Math.max(1,...rows.map(r=>r.n));
@@ -563,6 +634,10 @@ function viewInnst(){
     '<input type="date" id="te" value="'+t.end+'"></div></div>'+
     '<label for="mt">Oppmøtetid</label><input type="time" id="mt" value="'+esc(t.meetTime||"08:15")+'">'+
     '<p class="hint" style="margin-top:4px">Brukes når noen legger en dag i kalenderen.</p>'+
+    '<label for="pd">Voksne per dag</label><select id="pd">'+
+    [1,2,3,4].map(n=>'<option value="'+n+'"'+(perDag()===n?" selected":"")+">"+n+"</option>").join("")+"</select>"+
+    '<p class="hint" style="margin-top:4px">Hver plass går til én husstand, og samme husstand får aldri to plasser samme dag. '+
+    'Er det færre husstander enn plasser, står resten ledig til noen tar dem.</p>'+
     '<label for="skip">Ferier og fridager</label><textarea id="skip" style="min-height:96px" spellcheck="false">'+
     esc((t.skip||[]).map(s=>s.from+" til "+s.to+": "+s.label).join("\n"))+"</textarea>"+
     '<p class="hint">Format: 2026-09-28 til 2026-10-02: Høstferie. Én linje per periode. Enkeltdag: samme dato to ganger. Merk at lagring her fordeler dagene på nytt.</p>'+
@@ -682,8 +757,12 @@ function ukeTekst(){
   let out="Følgegruppa, uke "+uke(start)+":\n";
   for(let i=0;i<5;i++){const dt=add(start,i),f=ferie(dt),p=slot(dt);
     if(f){out+=DAGK[dow(dt)]+" "+kort(dt)+" "+f.label+"\n";continue;}
-    if(!p)continue;
-    out+=DAGK[dow(dt)]+" "+kort(dt)+" "+(p.familyId?navn(dt)+" ("+fam(p.familyId).name+")":"MANGLER FOLK")+"\n";}
+    const ps=plasser(dt);
+    if(!ps.length)continue;
+    const hus=plassHus(dt).filter(Boolean).map(x=>husnavn(x)+" ("+voksne(x)+")");
+    const led=ledige(dt);
+    out+=DAGK[dow(dt)]+" "+kort(dt)+" "+(hus.length?hus.join(" + "):"")+
+      (led?(hus.length?" + ":"")+"MANGLER "+led+" VOKSEN":"")+"\n";}
   return out.includes("\n",out.indexOf("\n")+1)?out:out+"Ingen skoledager denne uka.\n";
 }
 document.addEventListener("click",async e=>{
@@ -788,9 +867,11 @@ document.addEventListener("click",async e=>{
   if(a==="saveterm"){
     const start=document.getElementById("ts").value, end=document.getElementById("te").value;
     const meetTime=document.getElementById("mt").value||"08:15";
+    const pdEl=document.getElementById("pd");
+    const perDay=Math.max(1,Math.min(4,parseInt(pdEl?pdEl.value:"1",10)||1));
     if(!start||!end||start>end){toast("Sjekk datoene");return;}
     const skip=parseSkip(document.getElementById("skip").value);
-    await mutate(s=>{s.term={start,end,meetTime,skip};generer(s);});
+    await mutate(s=>{s.term={start,end,meetTime,perDay,skip};generer(s);});
     toast("Terminen er lagret og dagene fordelt");return;}
   if(a==="hday"){HDAY=add(HDAY||today(),+b.dataset.v);render();return;}
   if(a==="here"){const dt=b.dataset.d,kid=b.dataset.k;
@@ -805,27 +886,33 @@ document.addEventListener("click",async e=>{
     return;}
   if(a==="clearci"){const dt=b.dataset.d;await mutate(s=>{if(s.checkins)delete s.checkins[dt];});toast("Nullstilt for dagen");return;}
   if(a==="ics"){const dt=b.dataset.d;
-    downloadICS("folgegruppe_"+dt+".ics",[icsEvent(dt,"Følgegruppa: din tur til å levere","Husk å levere barna ved Steinerskolen.")]);
+    downloadICS("folgegruppe_"+dt+".ics",[icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))]);
     toast("Kalenderfil lastet ned");return;}
   if(a==="icsall"){
     const days=skoledager().filter(dt=>dt>=today()&&isMine(dt));
     if(!days.length){toast("Du har ingen dager igjen denne terminen");return;}
-    downloadICS("folgegruppe_dine_dager.ics",days.map(dt=>icsEvent(dt,"Følgegruppa: din tur til å levere","")));
+    downloadICS("folgegruppe_dine_dager.ics",days.map(dt=>icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))));
     toast(days.length+" dager lagt i kalenderfilen");return;}
   if(a==="gen"){
     if(!b.dataset.sure){b.dataset.sure="1";b.textContent="Trykk igjen for å bekrefte";return;}
     await mutate(s=>{s.order=[];generer(s);});toast("Dagene er fordelt");return;}
   if(a==="drop"){
     const dt=b.dataset.d;
-    await mutate(s=>{const p=s.plan[dt];if(!p||!p.familyId)return;
-      const f=s.families.find(x=>x.id===p.familyId);
-      p.original=p.original||p.familyId;p.familyId=null;
+    const i=b.dataset.i!==undefined?+b.dataset.i:minPlass(dt);
+    if(i<0)return;
+    await mutate(s=>{const ps=(s.plan[dt]||{}).slots||[];const sl=ps[i];if(!sl||!sl.familyId)return;
+      const f=s.families.find(x=>x.id===sl.familyId);
+      sl.original=sl.original||sl.familyId;sl.familyId=null;
       s.log.unshift({ts:Date.now(),text:(f?husnavn(f):"Noen")+" vil bytte bort "+lang(dt)});});
-    toast("Dagen er lagt ut for bytte. Nå kan andre ta den.");return;}
+    toast("Plassen er lagt ut for bytte. Nå kan andre ta den.");return;}
   if(a==="take"){
     const dt=b.dataset.d, f=myFam();if(!f)return;
-    await mutate(s=>{const p=s.plan[dt];if(!p||p.familyId)return;
-      p.familyId=f.id;s.log.unshift({ts:Date.now(),text:husnavn(f)+" tar "+lang(dt)});});
+    const nok=DATA.families.filter(x=>x.active!==false).length>=perDag();
+    if(nok&&plasser(dt).some(sl=>sl.familyId===f.id)){toast("Du står alt oppført denne dagen");return;}
+    const i=b.dataset.i!==undefined?+b.dataset.i:plasser(dt).findIndex(sl=>!sl.familyId);
+    if(i<0)return;
+    await mutate(s=>{const ps=(s.plan[dt]||{}).slots||[];const sl=ps[i];if(!sl||sl.familyId)return;
+      sl.familyId=f.id;s.log.unshift({ts:Date.now(),text:husnavn(f)+" tar "+lang(dt)});});
     toast("Du står nå oppført "+lang(dt));return;}
 });
 
@@ -836,7 +923,7 @@ document.addEventListener("click",async e=>{
   render();
 })();
 setInterval(async()=>{if(document.visibilityState==="visible"&&!BUSY&&TAB!=="innst"){
-  try{const r=await window.storage.get(KEY,true);if(r){const n=JSON.parse(r.value);
+  try{const r=await window.storage.get(KEY,true);if(r){const n=normaliser(JSON.parse(r.value));
     if(JSON.stringify(n)!==JSON.stringify(DATA)){DATA=n;render();}}}catch(e){}}},20000);
 document.addEventListener("visibilitychange",async()=>{
   if(document.visibilityState==="visible"&&TAB!=="innst"){await load();render();}});
