@@ -41,10 +41,10 @@ a{color:var(--kobolt)}
 .sheet{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px}
 .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-soft);font-weight:600}
 
-.bigdate{font-family:var(--display);font-size:34px;line-height:1.05;margin:10px 0 2px;letter-spacing:-.02em}
-.bigdate.none{font-size:24px;color:var(--ink-soft)}
-.underline{display:block;width:100%;height:9px;margin:2px 0 10px;overflow:visible}
-.countdown{font-size:14px;color:var(--ink-soft);margin-bottom:16px}
+.bigdate{font-family:var(--display);font-size:23px;line-height:1.06;margin:4px 0 0;letter-spacing:-.02em}
+.bigdate.none{font-size:19px;color:var(--ink-soft)}
+.underline{display:block;width:100%;height:6px;margin:0 0 5px;overflow:visible}
+.countdown{font-size:13px;color:var(--ink-soft);margin-bottom:10px}
 
 .btn{display:block;width:100%;min-height:50px;border-radius:12px;border:1px solid var(--ink);
   background:var(--ink);color:var(--paper);font-weight:600;padding:12px 16px;transition:transform .1s ease}
@@ -53,14 +53,13 @@ a{color:var(--kobolt)}
 .btn.warn{background:var(--rust);border-color:var(--rust);color:#fff}
 .btn.row{display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:42px;padding:8px 14px;font-size:14px}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow.tight .btn.row{min-height:38px;padding:7px 12px;font-size:13px}
+.sheet.slim{padding:12px 16px 13px}
 .ico{width:15px;height:15px;flex:0 0 auto;margin-right:7px;fill:none;stroke:currentColor;
   stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 
-.chain{width:100%;height:118px;display:block;margin:6px 0 2px}
 .weekhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .weeknav{background:none;border:1px solid var(--line);border-radius:9px;width:34px;height:34px;color:var(--ink);font-size:16px;line-height:1}
-.legend{display:flex;gap:14px;font-size:11px;color:var(--ink-soft);flex-wrap:wrap;margin-top:4px}
-.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
 
 .banner{border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:14px;
   background:#F6E5DF;border:1px solid rgba(175,67,39,.3);color:#7A2B18}
@@ -81,7 +80,12 @@ a{color:var(--kobolt)}
 .tag.you{background:var(--oker);border-color:var(--oker);color:#3A2A00}
 .tag.open{background:#fff;border-color:var(--rust);color:var(--rust)}
 
-.weeklabel{font-family:var(--display);font-size:15px;font-weight:600;margin:22px 0 6px;color:var(--ink-soft)}
+.weeklabel{display:flex;align-items:baseline;gap:9px;margin:22px 0 8px;flex-wrap:wrap}
+.weeklabel b{font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.03em;
+  background:var(--kobolt);color:#fff;padding:3px 11px;border-radius:999px;white-space:nowrap}
+.weeklabel span{font-size:12px;color:var(--ink-soft)}
+.weeklabel.na b{background:var(--oker);color:#3A2A00}
+.weeklabel.na span{color:var(--ink);font-weight:600}
 .holiday{font-size:13px;color:var(--ink-soft);padding:10px 2px;border-top:1px solid var(--line);font-style:italic}
 
 table{width:100%;border-collapse:collapse;font-size:14px}
@@ -380,40 +384,46 @@ function wobble(w){ // hånd tegnet strek
   return '<svg class="underline" viewBox="0 0 '+(w+14)+' 12" preserveAspectRatio="none" aria-hidden="true"><path d="'+p+
     '" fill="none" stroke="var(--oker)" stroke-width="3" stroke-linecap="round"/></svg>';}
 
-function chain(){
-  const base=mandag(today()), start=add(base,WEEKOFF*7);
-  const days=[0,1,2,3,4].map(i=>add(start,i));
-  const W=320,y=40,x0=30,gap=(W-2*x0)/4;
-  let path="M "+x0+" "+y;
-  for(let i=0;i<4;i++){const a=x0+gap*i,b=a+gap;path+=" Q "+(a+gap/2)+" "+(y+(i%2?7:-7))+" "+b+" "+y;}
-  let nodes="";
-  days.forEach((dt,i)=>{
-    const cx=x0+gap*i, f=ferie(dt), inTerm=dt>=DATA.term.start&&dt<=DATA.term.end&&!f;
-    const ps=plasser(dt), mine=isMine(dt), led=ledige(dt), noenFylt=ps.some(x=>x.familyId);
-    let c;
-    if(!inTerm||!ps.length) c='<circle cx="'+cx+'" cy="'+y+'" r="4" fill="var(--line)"/>';
-    else if(!noenFylt) c='<circle cx="'+cx+'" cy="'+y+'" r="11" fill="#fff" stroke="var(--rust)" stroke-width="2.5" stroke-dasharray="4 3"/>';
-    else{
-      c=mine
-        ? '<circle cx="'+cx+'" cy="'+y+'" r="13" fill="var(--oker)"/><circle cx="'+cx+'" cy="'+y+'" r="16.5" fill="none" stroke="var(--oker)" stroke-width="1.5" opacity=".45"/>'
-        : '<circle cx="'+cx+'" cy="'+y+'" r="11" fill="var(--kobolt)"/>';
-      if(led)c+='<circle cx="'+cx+'" cy="'+y+'" r="17" fill="none" stroke="var(--rust)" stroke-width="2" stroke-dasharray="4 3"/>';
+/* kompakte ringeknapper med fornavn i stedet for nummer */
+function ringKort(f){
+  if(!f)return "";
+  return phones(f.phone).map((n,i)=>{
+    const m=f.members[i]||f.members[0];
+    const nm=m?m.name.split(" ")[0]:n;
+    return '<a class="btn ghost row" href="tel:'+n.replace(/[^\d+]/g,"")+'">Ring '+esc(nm)+"</a>";
+  }).join("");
+}
+
+/* Dagene uke for uke. fra=null gir hele terminen, maksUker kutter etter et helt antall uker.
+   Returnerer html og hvor mange dager som ikke ble vist, så forsiden kan si det. */
+function dagListe(fra,maksUker){
+  let alle=[];let s=DATA.term.start,guard=0;
+  while(s<=DATA.term.end&&guard++<800){
+    const wd=dow(s);
+    if(wd>=1&&wd<=5&&(!fra||s>=fra))alle.push(s);
+    s=add(s,1);
+  }
+  let igjen=0;
+  if(maksUker&&alle.length){
+    const grense=add(mandag(alle[0]),maksUker*7);
+    const i=alle.findIndex(dt=>dt>=grense);
+    if(i>0){igjen=alle.slice(i).filter(dt=>!ferie(dt)).length;alle=alle.slice(0,i);}   // ferie er ikke en dag
+  }
+  if(!alle.length)return {html:'<div class="center">Ingen dager i planen.</div>',igjen:0};
+  let h="",w=null,first=true;
+  const naaMandag=mandag(today());
+  alle.forEach(dt=>{
+    const u=uke(dt);
+    if(u!==w){
+      w=u;
+      const man=mandag(dt), naa=man===naaMandag;
+      h+='<div class="weeklabel'+(naa?" na":"")+'"'+(first?' style="margin-top:8px"':"")+">"+
+        "<b>Uke "+u+"</b><span>"+kort(man)+"–"+kort(add(man,4))+(naa?" · denne uka":"")+"</span></div>";
+      first=false;
     }
-    const kort2=t=>t.length>11?t.slice(0,10)+"…":t;
-    const etiketter=f?[f.label]:(ps.length?ps.map(x=>x.familyId?husnavn(fam(x.familyId)):"mangler"):(inTerm?["ingen"]:[]));
-    nodes+=c+'<text x="'+cx+'" y="'+(y+30)+'" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--ink)">'+
-      esc(DAGK[dow(dt)])+" "+d(dt).getUTCDate()+'.</text>'+
-      etiketter.slice(0,3).map((t,j)=>'<text x="'+cx+'" y="'+(y+42+j*11)+'" text-anchor="middle" font-size="9.5" fill="'+
-        (t==="mangler"?"var(--rust)":"var(--ink-soft)")+'">'+esc(kort2(t))+"</text>").join("");
+    h+=dayRow(dt);
   });
-  return '<div class="weekhead"><button class="weeknav" data-act="week" data-v="-1" aria-label="Forrige uke">&#8249;</button>'+
-    '<div class="eyebrow">Uke '+uke(start)+(WEEKOFF===0?" (denne uka)":"")+'</div>'+
-    '<button class="weeknav" data-act="week" data-v="1" aria-label="Neste uke">&#8250;</button></div>'+
-    '<svg class="chain" viewBox="0 0 '+W+' 104" aria-hidden="true"><path d="'+path+
-    '" fill="none" stroke="var(--ink)" stroke-opacity=".2" stroke-width="2" stroke-linecap="round"/>'+nodes+'</svg>'+
-    '<div class="legend"><span><i class="dot" style="background:var(--oker)"></i>din familie</span>'+
-    '<span><i class="dot" style="background:var(--kobolt)"></i>dekket</span>'+
-    '<span><i class="dot" style="background:#fff;border:2px solid var(--rust)"></i>mangler en voksen</span></div>';
+  return {html:h,igjen:igjen};
 }
 
 function dayRow(dt,ctx){
@@ -439,7 +449,8 @@ function dayRow(dt,ctx){
         (sl.original&&sl.original!==family.id&&fam(sl.original)?" dekker for "+esc(husnavn(fam(sl.original))):"")+"</small>"
       : "Mangler en voksen"+(sl.original&&fam(sl.original)
           ?'<small>'+esc(husnavn(fam(sl.original)))+" vil bytte</small>":"");
-    const call=(!past&&!mine&&family&&ctx!=="flat")?callBtns(family.phone):"";
+    const naer=dt<=add(today(),1);            // ringeknapp bare når det er nå det gjelder
+    const call=(!past&&naer&&!mine&&family&&ctx!=="flat")?ringKort(family):"";
     return '<div class="slot'+(family?"":" open")+'"><div class="who">'+who+"</div>"+tag+call+act+"</div>";
   }).join("");
   return '<div class="day'+(isMine(dt)?" mine":"")+(ledige(dt)?" open":"")+'" style="'+(past?"opacity:.45":"")+'">'+
@@ -454,34 +465,30 @@ function viewHjem(){
   if(open.length){
     const mangler=open.reduce((n,dt)=>n+ledige(dt),0);
     h+='<div class="banner"><strong>'+mangler+" ledig"+(mangler===1?" plass":"e plasser")+" på "+
-      open.length+(open.length===1?" dag":" dager")+'.</strong> Se lista nedenfor hvis du kan ta en av dem.</div>';
+      open.length+(open.length===1?" dag":" dager")+'.</strong> Trykk «Jeg tar den» på en dag du kan.</div>';
   }
-  h+='<div class="sheet"><div class="eyebrow">Din neste dag</div>';
+  h+='<div class="sheet slim"><div class="eyebrow">Din neste dag</div>';
   if(nx){
-    const dif=Math.round((d(nx)-d(today()))/864e5);
-    h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(300)+
-      '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+
-      ", uke "+uke(nx)+". Du går for "+esc(husnavn(f))+".</div>"+
-      (medMeg(nx).length
-        ? '<p style="margin:-6px 0 14px;font-size:14px">Sammen med <strong>'+
-          esc(medMeg(nx).map(husnavn).join(" og "))+"</strong> ("+esc(medMeg(nx).map(voksne).join(", "))+")"+
-          (ledige(nx)?", og én plass står ledig":"")+".</p>"+
-          '<div class="btnrow" style="margin-bottom:10px">'+medMeg(nx).map(x=>callBtns(x.phone)).join("")+"</div>"
-        : ledige(nx)?'<p style="margin:-6px 0 14px;font-size:14px;color:var(--rust)">Ingen går sammen med deg ennå, '+
-            ledige(nx)+" plass"+(ledige(nx)===1?"":"er")+" står ledig.</p>":"")+
-      '<div class="btnrow"><button class="btn warn row" data-act="drop" data-d="'+nx+'" data-i="'+minPlass(nx)+'">Vil bytte denne dagen</button>'+
+    const dif=Math.round((d(nx)-d(today()))/864e5), med=medMeg(nx), led=ledige(nx);
+    h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(220)+
+      '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+", uke "+uke(nx)+
+      (med.length?" · sammen med "+esc(med.map(husnavn).join(" og "))+" ("+esc(med.map(voksne).join(", "))+")":"")+
+      (led?' · <span style="color:var(--rust)">'+led+" plass"+(led===1?"":"er")+" ledig</span>":"")+"</div>"+
+      '<div class="btnrow tight"><button class="btn warn row" data-act="drop" data-d="'+nx+
+      '" data-i="'+minPlass(nx)+'">Vil bytte</button>'+
       '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">'+kalIkon+'Legg i kalender</button>'+
-      '<button class="btn ghost row" data-act="icsall">'+kalIkon+'Legg alle mine dager</button></div>';
+      med.map(ringKort).join("")+"</div>";
   }else{
-    h+='<div class="bigdate none">Ingen dager igjen på deg</div><div class="countdown">Du står ikke oppført på flere dager denne terminen.</div>';
+    h+='<div class="bigdate none">Ingen dager igjen på deg</div>'+
+      '<div class="countdown" style="margin-bottom:0">Du står ikke oppført på flere dager denne terminen.</div>';
   }
   h+="</div>";
-  h+='<div class="sheet">'+chain()+"</div>";
-  h+='<div class="sheet"><div class="eyebrow">Ledige plasser</div>';
-  h+=open.length?open.map(dt=>dayRow(dt)).join(""):'<div class="center">Alle dager er dekket.</div>';
-  h+="</div>";
-  const mine=skoledager().filter(dt=>dt>=today()&&isMine(dt));
-  if(mine.length){h+='<div class="sheet"><div class="eyebrow">Alle dine dager</div>'+mine.map(dt=>dayRow(dt)).join("")+"</div>";}
+  const liste=dagListe(today(),3);
+  h+='<div class="sheet"><div class="eyebrow">Dagene fremover</div>'+liste.html+
+    (liste.igjen?'<p class="hint" style="margin:14px 0 0">Så følger '+liste.igjen+
+      ' dager til, ut terminen.</p>':"")+
+    '<button class="btn ghost" style="margin-top:12px" data-act="tab" data-t="kalender">'+kalIkon+
+    'Hele terminen</button></div>';
   return h+"</div>";
 }
 
@@ -529,22 +536,11 @@ function viewHenting(){
 }
 
 function viewKalender(){
-  const days=skoledager(), t=today();
-  let h='<div class="view"><div class="sheet"><div class="eyebrow">Hele terminen</div>';
-  let w=null, first=true;
-  const all=[];let s=DATA.term.start;let guard=0;
-  while(s<=DATA.term.end&&guard++<800){const wd=dow(s);if(wd>=1&&wd<=5)all.push(s);s=add(s,1);}
-  all.forEach(dt=>{
-    const u=uke(dt);
-    if(u!==w){w=u;h+='<div class="weeklabel"'+(first?' style="margin-top:12px"':"")+">Uke "+u+
-      (dt<=t&&add(dt,6)>=t?" · denne uka":"")+"</div>";first=false;}
-    h+=dayRow(dt);
-  });
-  if(!all.length)h+='<div class="center">Ingen plan satt opp ennå. Gå til Innstillinger.</div>';
-  h+='</div><div class="sheet"><div class="eyebrow">Del i gruppa</div>'+
+  let h='<div class="view"><div class="sheet"><div class="eyebrow">Hele terminen</div>'+dagListe(null).html+"</div>";
+  h+='<div class="sheet"><div class="eyebrow">Del i gruppa</div>'+
     '<p class="hint" style="margin:8px 0 12px">Lager en tekst for denne uka som du kan lime inn i chatten.</p>'+
-    '<button class="btn ghost" data-act="copy">Kopier ukeplan</button></div></div>';
-  return h;
+    '<button class="btn ghost" data-act="copy">Kopier ukeplan</button></div>';
+  return h+"</div>";
 }
 
 function viewFordeling(){
@@ -606,6 +602,10 @@ function viewInnst(){
       '<button class="btn ghost" data-act="savecontact" style="margin-top:12px">Lagre familien</button>'+
       '<button class="btn ghost" data-act="'+(inactive?"activateon":"activateoff")+'" style="margin-top:8px">'+
       (inactive?"Meld familien på igjen":"Meld familien av")+"</button></div>";
+    h+='<div class="sheet"><div class="eyebrow">Kalender</div>'+
+      '<p class="hint" style="margin:8px 0 12px">Laster ned alle dagene du står oppført på denne terminen som '+
+      'én fil du kan åpne i kalenderen. Enkeltdager legger du inn fra Din dag.</p>'+
+      '<button class="btn ghost" data-act="icsall">'+kalIkon+'Legg alle mine dager i kalenderen</button></div>';
   }
   if(isFounder()&&DATA.families.length===1){
     h+='<div class="sheet"><div class="eyebrow">Neste steg</div>'+
