@@ -387,10 +387,12 @@ function dagLogg(s,dt,tekst){const d=iDag(s,dt);d.logg.unshift({ts:Date.now(),te
 
 /* voksen som faktisk går for en husstand i dag, hvis noen har sagt det er dem */
 function vaktPerson(dt,husId){
-  const d=dagPost(dt), mid=d&&d.vakt?d.vakt[husId]:null;
-  if(!mid)return null;
   const f=fam(husId);
-  return f?f.members.find(m=>m.id===mid)||null:null;
+  if(!f)return null;
+  const d=dagPost(dt), mid=d&&d.vakt?d.vakt[husId]:null;
+  if(mid)return f.members.find(m=>m.id===mid)||null;
+  /* Er det bare én voksen i husstanden, er det ingenting å si fra om. */
+  return f.members.length===1?f.members[0]:null;
 }
 /* eget nummer om det finnes, ellers husstandens første */
 function tlfFor(medlem,hus){
@@ -458,6 +460,7 @@ function applyFuture(state,reshuffle){
     activeIds.forEach(id=>{if(!order.includes(id))order.push(id);});
   }
   state.order=order;
+  state.planSatt=Date.now();          // synlig i Fordeling, så en omfordeling ikke skjer i det stille
   const n=Math.max(1,state.term.perDay||1);
   const days=skoledager().filter(dt=>dt>=today());
   let c=0;
@@ -610,6 +613,12 @@ function viewHjem(){
       '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+", uke "+uke(nx)+
       (med.length?" · sammen med "+esc(med.map(husnavn).join(" og "))+" ("+esc(med.map(voksne).join(", "))+")":"")+
       (led?' · <span style="color:var(--rust)">'+led+" plass"+(led===1?"":"er")+" ledig</span>":"")+"</div>"+
+      (f&&f.members.length>1&&(!vaktPerson(nx,f.id)||vaktPerson(nx,f.id).id!==ME)
+        ? '<p class="hint" style="margin:0 0 10px">'+
+          (vaktPerson(nx,f.id)?esc(vaktPerson(nx,f.id).name.split(" ")[0])+" står som den som går."
+            :"Ingen i husstanden har sagt hvem som går.")+
+          ' <button class="btn ghost row" style="margin-top:8px" data-act="detErMeg" data-d="'+nx+
+          '" data-h="'+f.id+'">Det er meg som går</button></p>':"")+
       '<div class="btnrow tight"><button class="btn warn row" data-act="drop" data-d="'+nx+
       '" data-i="'+minPlass(nx)+'">Vil bytte</button>'+
       '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">'+kalIkon+'Legg i kalender</button>'+
@@ -773,7 +782,6 @@ function fasenHjem(dt){
         (st.notat?" · "+esc(st.notat):"")+"</span></div>";});
   }
   if(!kryss)h+='<p class="hint" style="margin:14px 0 0">Det er de to på vakt som krysser av her.</p>';
-  h+='<button class="btn ghost" style="margin-top:16px" data-act="hentemelding" data-d="'+dt+'">Kopier melding til gruppa</button>';
   h+="</div>";
   if(d&&d.logg&&d.logg.length){
     h+='<div class="sheet"><div class="eyebrow">I dag</div>';
@@ -825,7 +833,9 @@ function viewFordeling(){
   const max=Math.max(1,...rows.map(r=>r.n));
   const mineF=myFam();
   let h='<div class="view"><div class="sheet"><div class="eyebrow">Dager per familie</div>'+
-    '<p class="hint" style="margin:8px 0 16px">Teller hele terminen, etter bytter.</p><table><thead><tr>'+
+    '<p class="hint" style="margin:8px 0 16px">Teller hele terminen, etter bytter.'+
+    (DATA.planSatt?" Dagene ble sist fordelt "+new Date(DATA.planSatt).toLocaleDateString("nb-NO",
+      {day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})+".":"")+'</p><table><thead><tr>'+
     '<th>Familie</th><th class="num">Dager</th><th class="num">Avmeldt</th><th class="num">Tatt for andre</th></tr></thead><tbody>';
   rows.forEach(r=>{h+='<tr><td>'+esc(husnavn(r.f))+(mineF&&mineF.id===r.f.id?" (din)":"")+(r.f.active===false?" (ikke med nå)":"")+
     '<div class="bar" style="width:'+Math.round(r.n/max*100)+'%;margin-top:6px"></div></td>'+
@@ -911,6 +921,15 @@ function viewInnst(){
     [1,2,3,4].map(n=>'<option value="'+n+'"'+(perDag()===n?" selected":"")+">"+n+"</option>").join("")+"</select>"+
     '<p class="hint" style="margin-top:4px">Hver plass går til én husstand, og samme husstand får aldri to plasser samme dag. '+
     'Er det færre husstander enn plasser, står resten ledig til noen tar dem.</p>'+
+
+    '<label for="skip">Ferier og fridager</label><textarea id="skip" style="min-height:96px" spellcheck="false">'+
+    esc((t.skip||[]).map(s=>s.from+" til "+s.to+": "+s.label).join("\n"))+"</textarea>"+
+    '<p class="hint">Format: 2026-09-28 til 2026-10-02: Høstferie. Én linje per periode. Enkeltdag: samme dato to ganger.</p>'+
+    '<p class="hint">Endrer du datoer, ferier eller voksne per dag, må dagene fordeles på nytt, og da spør appen først. '+
+    'Endrer du bare oppmøtetid, står dagene urørt.</p>'+
+    '<button class="btn ghost" data-act="saveterm" style="margin-top:12px">Lagre termin</button></div>';
+  h+='<div class="sheet"><div class="eyebrow">Banen hjem</div>'+
+    '<p class="hint" style="margin:8px 0 0">Dette rører aldri fordelingen av dager.</p>'+
     '<div class="two" style="margin-top:6px"><div><label for="bfra">Første bane hjem</label>'+
     '<input id="bfra" value="'+esc(t.baneFra||"15:58")+'" placeholder="15:58"></div>'+
     '<div><label for="btil">Siste bane hjem</label>'+
@@ -919,16 +938,12 @@ function viewInnst(){
     '<input id="bint" inputmode="numeric" value="'+esc(String(t.baneIntervall||8))+'"></div>'+
     '<div><label for="reise">Reisetid i minutter</label>'+
     '<input id="reise" inputmode="numeric" value="'+esc(String(t.reisetid||12))+'"></div></div>'+
-    '<p class="hint">Gir valgene i hentemodus: '+esc(baneListe().join(", "))+
-    '. Reisetiden brukes til å vise når de er hjemme.</p>'+
+    '<p class="hint">Gir valgene i hentemodus: '+esc(baneListe().join(", "))+'</p>'+
     '<div class="two"><div><label for="sfra">Stasjon ved skolen</label>'+
     '<input id="sfra" value="'+esc(t.stasjonFra||"")+'" placeholder="valgfritt"></div>'+
     '<div><label for="stil">Stasjon hjemme</label>'+
     '<input id="stil" value="'+esc(t.stasjonTil||"")+'" placeholder="valgfritt"></div></div>'+
-    '<label for="skip">Ferier og fridager</label><textarea id="skip" style="min-height:96px" spellcheck="false">'+
-    esc((t.skip||[]).map(s=>s.from+" til "+s.to+": "+s.label).join("\n"))+"</textarea>"+
-    '<p class="hint">Format: 2026-09-28 til 2026-10-02: Høstferie. Én linje per periode. Enkeltdag: samme dato to ganger. Merk at lagring her fordeler dagene på nytt.</p>'+
-    '<button class="btn ghost" data-act="saveterm" style="margin-top:12px">Lagre termin</button></div>';
+    '<button class="btn ghost" data-act="savebane" style="margin-top:12px">Lagre banen</button></div>';
   h+='<div class="sheet"><div class="eyebrow">Sett opp planen</div>'+
     '<p class="hint" style="margin:8px 0 12px">Fordeler dagene fra i dag og fremover på nytt, tilfeldig, mellom familiene som er med nå. Dager som er passert rører den ikke. Dette overskriver bytter og avmeldinger fremover.</p>'+
     '<button class="btn" data-act="gen">Fordel dagene på nytt</button></div>';
@@ -1039,23 +1054,6 @@ function parseKids(txt,prev){
     return ex?{...ex,name:n}:{id:nid("k"),name:n};
   });
 }
-/* Én melding til gruppechatten, siden en nettapp ikke kan varsle telefonen selv. */
-function hentetekst(dt){
-  const d=dagPost(dt), t=DATA.term;
-  const med=hentesIDag(dt).map(k=>k.name), uten=avmeldtIDag(dt);
-  let ut="Følgegruppa "+lang(dt)+".\n";
-  if(d&&d.bane){
-    ut+="Tar "+d.bane+(t.stasjonFra?" fra "+t.stasjonFra:"")+
-      ", hjemme "+ankomst(d.bane)+(t.stasjonTil?" på "+t.stasjonTil:"")+".\n";
-  }else ut+="Banetid ikke satt ennå.\n";
-  const paaTur=plassHus(dt).filter(Boolean).map(f=>{
-    const p=vaktPerson(dt,f.id);return p?p.name.split(" ")[0]:voksne(f);});
-  if(paaTur.length)ut+="Med barna: "+paaTur.join(" og ")+".\n";
-  if(med.length)ut+="Blir med: "+med.join(", ")+".\n";
-  if(uten.length)ut+="Ikke med: "+uten.map(k=>{
-    const n=barnStatus(dt,k.id).notat;return k.name+(n?" ("+n+")":"");}).join(", ")+".\n";
-  return ut;
-}
 function ukeTekst(){
   const start=add(mandag(today()),WEEKOFF*7);
   let out="Følgegruppa, uke "+uke(start)+":\n";
@@ -1094,6 +1092,7 @@ document.addEventListener("click",async e=>{
     if(!list.length){toast("Skriv inn minst \u00e9n linje");return;}
     const fresh=!DATA.families.length;
     const keepMe=ME;
+    let nye=0;
     await mutate(s=>{
       const finn={};s.families.forEach(f=>{finn[husnokkel(f)]=f;});
       list.forEach(nf=>{
@@ -1111,12 +1110,18 @@ document.addEventListener("click",async e=>{
         }else{
           s.families.push({id:nid("f"),name:nf.barn.map(k=>k.name).join(" og "),active:true,
             phone:"",kids:nf.barn,members:nf.voksne});
+          nye++;
         }
       });
-      if(fresh){generer(s);}else{regenFuture(s,"Lista ble oppdatert");}
+      /* Retting av navn skal ikke røre planen. Bare nye husstander må inn i rulleringen. */
+      if(fresh)generer(s);
+      else if(nye)regenFuture(s,nye+(nye===1?" ny husstand":" nye husstander")+" inn i rulleringen");
+      else s.log.unshift({ts:Date.now(),text:"Lista ble oppdatert, dagene står som de var"});
     });
     if(keepMe&&!DATA.families.some(f=>f.members.some(m=>m.id===keepMe)))setMe(null);
-    toast(fresh?"Klar. Velg hvem du er.":"Lagt til eller oppdatert. Ingen ble fjernet.");return;}
+    toast(fresh?"Klar. Velg hvem du er."
+      :nye?"Lagt til. Dagene er fordelt på nytt."
+      :"Oppdatert. Ingen ble fjernet, og dagene står som de var.");return;}
   if(a==="joinnew"){
     const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
     const myName=g("newmyname"), partner=g("newpartner"), phone=g("newphone");
@@ -1179,14 +1184,26 @@ document.addEventListener("click",async e=>{
     const perDay=Math.max(1,Math.min(4,parseInt(pdEl?pdEl.value:"1",10)||1));
     if(!start||!end||start>end){toast("Sjekk datoene");return;}
     const skip=parseSkip(document.getElementById("skip").value);
+    const gml=DATA.term;
+    /* Bare disse fire påvirker hvilke dager som finnes. Endres de ikke, står planen urørt. */
+    const planEndres=gml.start!==start||gml.end!==end||(gml.perDay||1)!==perDay||
+      JSON.stringify(gml.skip||[])!==JSON.stringify(skip);
+    if(planEndres&&!b.dataset.sure){
+      b.dataset.sure="1";b.textContent="Dette fordeler dagene på nytt. Trykk igjen";return;}
+    await mutate(s=>{
+      Object.assign(s.term,{start,end,meetTime,perDay,skip});
+      if(planEndres)regenFuture(s,"Terminen ble endret, og dagene fordelt på nytt");
+    });
+    toast(planEndres?"Terminen er lagret, og dagene fordelt på nytt"
+      :"Terminen er lagret. Dagene står som de var.");return;}
+  if(a==="savebane"){
     const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
     const tall=(id,std)=>{const n=parseInt(g(id),10);return isNaN(n)?std:Math.max(1,Math.min(120,n));};
     const baneFra=/^\d{1,2}:\d{2}$/.test(g("bfra"))?g("bfra"):DATA.term.baneFra;
     const baneTil=/^\d{1,2}:\d{2}$/.test(g("btil"))?g("btil"):DATA.term.baneTil;
-    await mutate(s=>{s.term={start,end,meetTime,perDay,skip,
-      baneFra,baneTil,baneIntervall:tall("bint",8),reisetid:tall("reise",12),
-      stasjonFra:g("sfra"),stasjonTil:g("stil")};generer(s);});
-    toast("Terminen er lagret og dagene fordelt");return;}
+    await mutate(s=>{Object.assign(s.term,{baneFra,baneTil,baneIntervall:tall("bint",8),
+      reisetid:tall("reise",12),stasjonFra:g("sfra"),stasjonTil:g("stil")});});
+    toast("Banen er lagret. Dagene står som de var.");return;}
   if(a==="hday"){HDAY=add(HDAY||today(),+b.dataset.v);HFASE=null;render();return;}
   if(a==="hfase"){HFASE=b.dataset.f;render();window.scrollTo(0,0);return;}
   if(a==="detErMeg"){
@@ -1248,11 +1265,6 @@ document.addEventListener("click",async e=>{
       if(txt){bs.notat=txt;dagLogg(s,dt,"Beskjed om "+navn+": "+txt);}
       else{delete bs.notat;dagLogg(s,dt,"Beskjeden om "+navn+" er fjernet");}});
     toast(txt?"Beskjeden er lagret":"Beskjeden er fjernet");return;}
-  if(a==="hentemelding"){
-    const txt=hentetekst(b.dataset.d);
-    try{await navigator.clipboard.writeText(txt);toast("Meldingen er kopiert");}
-    catch(err){toast(txt);}
-    return;}
   if(a==="ics"){const dt=b.dataset.d;
     downloadICS("folgegruppe_"+dt+".ics",[icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))]);
     toast("Kalenderfil lastet ned");return;}
