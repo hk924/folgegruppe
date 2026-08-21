@@ -263,6 +263,7 @@ let __storageReady = false;
 const KEY="folgegruppe_v1", MEKEY="folgegruppe_meg";
 let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
 let ADMIN=false, LOADERR=null, HFASE=null;
+let MINVERSJON=null, NYVERSJON=false;
 
 const blank=()=>({v:3,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
   perDay:2,reisetid:12,baneFra:"15:58",baneTil:"16:38",baneIntervall:8,
@@ -330,6 +331,24 @@ async function mutate(fn){
     :"Klarte ikke å lagre, ingenting er endret. Prøv igjen.");
 }
 async function setMe(id){ME=id;try{await window.storage.set(MEKEY,JSON.stringify({id}),false);}catch(e){}render();}
+
+/* En app lagt på hjemskjermen gjenopptas fra minnet. Da hentes dataene på nytt, men
+   koden er den som ble lastet første gang, kanskje uker siden. Vi følger derfor med på
+   etag til selve siden, som Vercel bytter ved hver deploy, og sier fra i stedet for å
+   laste om under føttene på noen. */
+async function sjekkVersjon(){
+  try{
+    let r=await fetch(location.pathname,{method:"HEAD",cache:"no-store"});
+    let ny=r.headers.get("etag")||r.headers.get("last-modified");
+    if(!ny){
+      r=await fetch(location.pathname,{cache:"no-store"});
+      ny=r.headers.get("etag")||r.headers.get("last-modified");
+    }
+    if(!ny)return;
+    if(!MINVERSJON){MINVERSJON=ny;return;}
+    if(ny!==MINVERSJON&&!NYVERSJON){NYVERSJON=true;render();}
+  }catch(e){}
+}
 
 /* ---------- datoer ---------- */
 const DAG=["søndag","mandag","tirsdag","onsdag","torsdag","fredag","lørdag"];
@@ -1051,8 +1070,11 @@ function render(){
     tabs.innerHTML=TABS.map(([id,label,ic])=>'<button data-act="tab" data-t="'+id+'" aria-current="'+(TAB===id)+'">'+
       '<span class="ti" aria-hidden="true">'+ic+"</span>"+label+"</button>").join("");
   }
+  const nyttBanner=NYVERSJON?'<div class="banner" style="background:#E7EDF4;border-color:rgba(47,92,138,.35);color:#1E3F5E">'+
+    '<strong>Det finnes en nyere versjon av appen.</strong> Du ser en gammel utgave til du laster den inn.'+
+    '<button class="btn ghost row" style="margin-top:10px" data-act="oppdater">Last inn den nye</button></div>':"";
   app.innerHTML='<div class="topbar"><button class="wordmark" data-act="reload" style="background:none;border:0;padding:0;text-align:left">Følgegruppa</button>'+
-    (ME&&myFam()?'<button class="whoami" data-act="switch">'+esc(meName())+"</button>":"")+"</div>"+body;
+    (ME&&myFam()?'<button class="whoami" data-act="switch">'+esc(meName())+"</button>":"")+"</div>"+nyttBanner+body;
 }
 
 /* ---------- handlinger ---------- */
@@ -1110,7 +1132,8 @@ document.addEventListener("click",async e=>{
   if(a==="copylink"){
     try{await navigator.clipboard.writeText(location.href);toast("Lenken er kopiert");}
     catch(err){toast(location.href);}return;}
-  if(a==="reload"){await load();render();toast("Oppdatert");return;}
+  if(a==="oppdater"){location.reload();return;}
+  if(a==="reload"){await load();render();sjekkVersjon();toast("Oppdatert");return;}
   if(a==="copy"){try{await navigator.clipboard.writeText(ukeTekst());toast("Ukeplanen er kopiert");}
     catch(err){toast(ukeTekst());}return;}
   if(a==="savefams"){
@@ -1342,12 +1365,16 @@ document.addEventListener("click",async e=>{
   await load();
   if(needsMe())TAB="innst";   // ikke valgt person på denne telefonen, start der man ordner det
   render();
+  sjekkVersjon();
 })();
+setInterval(sjekkVersjon,3600000);
 setInterval(async()=>{if(document.visibilityState==="visible"&&!BUSY&&TAB!=="innst"){
   try{const r=await window.storage.get(KEY,true);if(r){const n=normaliser(JSON.parse(r.value));
     if(JSON.stringify(n)!==JSON.stringify(DATA)){DATA=n;render();}}}catch(e){}}},20000);
 document.addEventListener("visibilitychange",async()=>{
-  if(document.visibilityState==="visible"&&TAB!=="innst"){await load();render();}});
+  if(document.visibilityState!=="visible")return;
+  sjekkVersjon();                       // her fanges den gjenopptatte hjemskjerm-appen
+  if(TAB!=="innst"){await load();render();}});
 </script>
 </body>
 </html>
