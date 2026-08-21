@@ -196,6 +196,11 @@ a.btn{text-decoration:none;display:inline-flex}
 /* ====== PRODUKSJON: Supabase oppsett ======
    Fyll inn de to linjene under fra ditt Supabase prosjekt (Settings, API).
    Anon key er trygg å ha i klartekst her, den er laget for å ligge i frontend koden. */
+/* Byggmerke. Endres ved hver deploy, og er det appen kjenner seg selv igjen på.
+   Det må ligge i fila selv, ikke hentes, ellers kan en app som kjører fra cache
+   tro at den er ny fordi serveren svarer nytt. */
+const BYGG = "2026-08-21-4";
+
 const SUPABASE_URL = "https://cdbazglchnghywskgiel.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkYmF6Z2xjaG5naHl3c2tnaWVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTA0MjMsImV4cCI6MjEwMjU2NjQyM30.0KUA4LWLbCV_IgcDfvnmXDuq28W3MEloEA-kQNOVfH0";
 
@@ -336,17 +341,21 @@ async function setMe(id){ME=id;try{await window.storage.set(MEKEY,JSON.stringify
    koden er den som ble lastet første gang, kanskje uker siden. Vi følger derfor med på
    etag til selve siden, som Vercel bytter ved hver deploy, og sier fra i stedet for å
    laste om under føttene på noen. */
+let SISTSJEKK=0;
 async function sjekkVersjon(){
+  if(NYVERSJON)return;
+  const naa=Date.now();
+  if(naa-SISTSJEKK<300000)return;          // ikke ved hvert eneste bytte mellom apper
+  SISTSJEKK=naa;
   try{
-    let r=await fetch(location.pathname,{method:"HEAD",cache:"no-store"});
-    let ny=r.headers.get("etag")||r.headers.get("last-modified");
-    if(!ny){
-      r=await fetch(location.pathname,{cache:"no-store"});
-      ny=r.headers.get("etag")||r.headers.get("last-modified");
-    }
+    const r=await fetch(location.pathname,{cache:"no-store"});
+    const txt=await r.text();
+    const m=txt.match(/const BYGG = "([^"]+)"/);
+    if(m&&m[1]!==BYGG){NYVERSJON=true;render();return;}   // sikreste signal: fila sier noe annet enn oss
+    const ny=r.headers.get("etag")||r.headers.get("last-modified");
     if(!ny)return;
-    if(!MINVERSJON){MINVERSJON=ny;return;}
-    if(ny!==MINVERSJON&&!NYVERSJON){NYVERSJON=true;render();}
+    if(!MINVERSJON)MINVERSJON=ny;                          // reserve, om byggmerket ikke er bumpet
+    else if(ny!==MINVERSJON){NYVERSJON=true;render();}
   }catch(e){}
 }
 
