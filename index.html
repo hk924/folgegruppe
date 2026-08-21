@@ -258,7 +258,7 @@ let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
 let ADMIN=false, LOADERR=null, HFASE=null;
 
 const blank=()=>({v:3,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
-  perDay:2,reisetid:12,baneFra:"15:58",baneTil:"16:38",baneIntervall:8,stasjonFra:"",stasjonTil:"",
+  perDay:2,reisetid:12,baneFra:"15:58",baneTil:"16:38",baneIntervall:8,
   skip:[{from:"2026-09-28",to:"2026-10-02",label:"Høstferie"}]},plan:{},dager:{},log:[]});
 
 /* En dag hadde før én familie: {familyId, original}. Nå har den en plass per voksen som skal gå:
@@ -279,6 +279,7 @@ function normaliser(s){
   });
   /* Gamle checkins var ett flagg per barn per dag: "here" betydde hentet på skolen,
      "away" betydde ikke med i dag. Nå er morgen og ettermiddag to spørsmål. */
+  delete s.term.stasjonFra; delete s.term.stasjonTil;   // ble bare brukt i en melding vi ikke har lenger
   s.dager=s.dager||{};
   if(s.checkins){
     Object.keys(s.checkins).forEach(dt=>{
@@ -448,7 +449,15 @@ function downloadICS(filename,events){
 }
 
 /* ---------- planlegging ---------- */
-function applyFuture(state,reshuffle){
+/* Å ha vakt betyr sen jobbstart og tidlig avreise. Det må planlegges, så en endring i
+   hvem som er med skal ikke røre de nærmeste dagene. Nye husstander, og husstander som
+   melder seg av, virker fra mandagen minst to uker frem. */
+const LEDETID=14;
+function ledeDato(){
+  const d=add(today(),LEDETID);
+  return dow(d)===1?d:add(mandag(d),7);   // første mandag minst to uker frem, aldri før
+}
+function applyFuture(state,reshuffle,fra){
   const activeIds=state.families.filter(f=>f.active!==false).map(f=>f.id);
   if(!activeIds.length)return;
   let order;
@@ -462,7 +471,7 @@ function applyFuture(state,reshuffle){
   state.order=order;
   state.planSatt=Date.now();          // synlig i Fordeling, så en omfordeling ikke skjer i det stille
   const n=Math.max(1,state.term.perDay||1);
-  const days=skoledager().filter(dt=>dt>=today());
+  const days=skoledager().filter(dt=>dt>=(fra||today()));
   let c=0;
   days.forEach(dt=>{
     const slots=[], brukt={};
@@ -482,8 +491,8 @@ function generer(state){
   applyFuture(state,true);
   state.log.unshift({ts:Date.now(),text:"Planen ble satt opp på nytt fra i dag"});
 }
-function regenFuture(state,note){
-  applyFuture(state,false);
+function regenFuture(state,note,fra){
+  applyFuture(state,false,fra);
   if(note)state.log.unshift({ts:Date.now(),text:note});
 }
 
@@ -589,8 +598,7 @@ function viewHjem(){
   const iD=today(), dP=dagPost(iD), harVakt=isMine(iD), skoledag=plasser(iD).length>0;
   if(skoledag&&dP&&dP.bane&&!harVakt){
     h+='<div class="banner" style="background:#E7EDF4;border-color:rgba(47,92,138,.3);color:#1E3F5E">'+
-      '<strong>Barna kommer '+esc(dP.bane)+', hjemme '+esc(ankomst(dP.bane))+
-      (DATA.term.stasjonTil?" på "+esc(DATA.term.stasjonTil):"")+'.</strong> '+
+      '<strong>Barna kommer med banen '+esc(dP.bane)+', hjemme '+esc(ankomst(dP.bane))+'.</strong> '+
       '<button class="btn ghost row" style="margin-top:10px" data-act="tab" data-t="henting">Se hentelista</button></div>';
   }
   if(skoledag&&harVakt){
@@ -742,9 +750,8 @@ function fasenHjem(dt){
   const d=dagPost(dt), bane=d&&d.bane, kryss=kanKrysse(dt), t=DATA.term;
   let h='<div class="sheet"><div class="eyebrow">Banen hjem</div>';
   if(bane){
-    h+='<div class="stort">'+esc(bane)+(t.stasjonFra?" fra "+esc(t.stasjonFra):"")+"</div>"+
-      '<p style="margin:2px 0 0;font-size:14px">Hjemme '+esc(ankomst(bane))+
-      (t.stasjonTil?" på "+esc(t.stasjonTil):"")+".</p>";
+    h+='<div class="stort">Banen '+esc(bane)+"</div>"+
+      '<p style="margin:2px 0 0;font-size:14px">Hjemme på perrongen '+esc(ankomst(bane))+".</p>";
   }else{
     h+='<div class="stort" style="color:var(--ink-soft)">Banetid ikke satt ennå</div>'+
       '<p class="hint" style="margin:2px 0 0">De på vakt setter den når de vet hvilken bane de tar.</p>';
@@ -908,7 +915,8 @@ function viewInnst(){
     '<p class="hint" style="margin:8px 0 0">En linje per barn: <strong>barnets fornavn, kolon, de voksne</strong>. '+
     'Som <em>Elliot: Hallgeir, Rachel</em>. Har en familie to barn i gruppa, skriv <em>Ida og Leo: Kari</em> på én linje, '+
     'de går som én husstand. Dette legger til og oppdaterer, det fjerner aldri noen. '+
-    'Skal noen ut av rulleringen, gjør de det selv under Din familie.</p>'+
+    'Skal noen ut av rulleringen, gjør de det selv under Din familie. '+
+    'Nye husstander kommer inn fra '+esc(kort(ledeDato()))+', slik at ingen får endret dagene sine på kort varsel.</p>'+
     '<textarea id="fams" spellcheck="false">'+
     esc(DATA.families.map(f=>husnavn(f)+": "+f.members.map(m=>m.name).join(", ")).join("\n"))+"</textarea>"+
     '<button class="btn ghost" data-act="savefams" style="margin-top:10px">Lagre lista</button></div>';
@@ -939,10 +947,6 @@ function viewInnst(){
     '<div><label for="reise">Reisetid i minutter</label>'+
     '<input id="reise" inputmode="numeric" value="'+esc(String(t.reisetid||12))+'"></div></div>'+
     '<p class="hint">Gir valgene i hentemodus: '+esc(baneListe().join(", "))+'</p>'+
-    '<div class="two"><div><label for="sfra">Stasjon ved skolen</label>'+
-    '<input id="sfra" value="'+esc(t.stasjonFra||"")+'" placeholder="valgfritt"></div>'+
-    '<div><label for="stil">Stasjon hjemme</label>'+
-    '<input id="stil" value="'+esc(t.stasjonTil||"")+'" placeholder="valgfritt"></div></div>'+
     '<button class="btn ghost" data-act="savebane" style="margin-top:12px">Lagre banen</button></div>';
   h+='<div class="sheet"><div class="eyebrow">Sett opp planen</div>'+
     '<p class="hint" style="margin:8px 0 12px">Fordeler dagene fra i dag og fremover på nytt, tilfeldig, mellom familiene som er med nå. Dager som er passert rører den ikke. Dette overskriver bytter og avmeldinger fremover.</p>'+
@@ -1115,12 +1119,13 @@ document.addEventListener("click",async e=>{
       });
       /* Retting av navn skal ikke røre planen. Bare nye husstander må inn i rulleringen. */
       if(fresh)generer(s);
-      else if(nye)regenFuture(s,nye+(nye===1?" ny husstand":" nye husstander")+" inn i rulleringen");
+      else if(nye)regenFuture(s,nye+(nye===1?" ny husstand":" nye husstander")+
+        " er med i rulleringen fra "+kort(ledeDato()),ledeDato());
       else s.log.unshift({ts:Date.now(),text:"Lista ble oppdatert, dagene står som de var"});
     });
     if(keepMe&&!DATA.families.some(f=>f.members.some(m=>m.id===keepMe)))setMe(null);
     toast(fresh?"Klar. Velg hvem du er."
-      :nye?"Lagt til. Dagene er fordelt på nytt."
+      :nye?"Lagt til, og med fra "+kort(ledeDato())+". De neste ukene er urørt."
       :"Oppdatert. Ingen ble fjernet, og dagene står som de var.");return;}
   if(a==="joinnew"){
     const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
@@ -1148,22 +1153,34 @@ document.addEventListener("click",async e=>{
       if(partner)voksne.push({id:nid("m"),name:partner});
       s.families.push({id:nid("f"),name:barn.map(k=>k.name).join(" og "),active:true,phone,kids:barn,members:voksne});
       if(!s.founderId){s.founderId=newId;forst=true;}   // den f\u00f8rste som legger seg til, styrer gruppa
-      regenFuture(s,barn.map(k=>k.name).join(" og ")+(forst?" satte opp gruppa":" ble lagt til"));
+      const nvn=barn.map(k=>k.name).join(" og ");
+      if(forst)generer(s);
+      else regenFuture(s,nvn+" er med i rulleringen fra "+kort(ledeDato()),ledeDato());
     });
     if(LOADERR)return;                                   // ingenting ble lagret, ikke l\u00e5s oss til en id som ikke finnes
     TAB="hjem";
     await setMe(newId);
     toast(blePart?"Du er lagt til som voksen hos "+barn.map(k=>k.name).join(" og ")
       :forst?"Gruppa er opprettet. Del lenken med de andre."
-      :"Velkommen. Du er med i rulleringen fra i dag.");return;}
+      :"Velkommen. Du er med i rulleringen fra "+kort(ledeDato())+", så de neste ukene står urørt.");return;}
   if(a==="activateoff"){
-    const fid=myFam().id;
-    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=false;regenFuture(s,husnavn(f)+" ble meldt av");});
-    toast("Familien er meldt av. Fremtidige dager er fordelt på de andre.");return;}
+    const fid=myFam().id, grense=ledeDato();
+    let ute=0;
+    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;
+      f.active=false;
+      /* De nærmeste dagene skyves ikke over på andre bak deres rygg, de legges ut for bytte. */
+      skoledager().filter(dt=>dt>=today()&&dt<grense).forEach(dt=>{
+        ((s.plan[dt]||{}).slots||[]).forEach(sl=>{
+          if(sl.familyId===fid){sl.original=sl.original||fid;sl.familyId=null;ute++;}});
+      });
+      regenFuture(s,husnavn(f)+" ble meldt av, og har "+ute+" dager ute for bytte",grense);});
+    toast(ute?"Meldt av. "+ute+" dager før "+kort(grense)+" ligger nå ute for bytte."
+      :"Meldt av. Dagene fra "+kort(grense)+" er fordelt på de andre.");return;}
   if(a==="activateon"){
     const fid=myFam().id;
-    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=true;regenFuture(s,husnavn(f)+" ble meldt på igjen");});
-    toast("Velkommen tilbake i rulleringen.");return;}
+    await mutate(s=>{const f=s.families.find(x=>x.id===fid);if(!f)return;f.active=true;
+      regenFuture(s,husnavn(f)+" ble meldt på igjen, med fra "+kort(ledeDato()),ledeDato());});
+    toast("Velkommen tilbake, med fra "+kort(ledeDato())+".");return;}
   if(a==="savecontact"){
     const fid=myFam().id;
     const phone=document.getElementById("famphone").value.trim();
@@ -1202,7 +1219,7 @@ document.addEventListener("click",async e=>{
     const baneFra=/^\d{1,2}:\d{2}$/.test(g("bfra"))?g("bfra"):DATA.term.baneFra;
     const baneTil=/^\d{1,2}:\d{2}$/.test(g("btil"))?g("btil"):DATA.term.baneTil;
     await mutate(s=>{Object.assign(s.term,{baneFra,baneTil,baneIntervall:tall("bint",8),
-      reisetid:tall("reise",12),stasjonFra:g("sfra"),stasjonTil:g("stil")});});
+      reisetid:tall("reise",12)});});
     toast("Banen er lagret. Dagene står som de var.");return;}
   if(a==="hday"){HDAY=add(HDAY||today(),+b.dataset.v);HFASE=null;render();return;}
   if(a==="hfase"){HFASE=b.dataset.f;render();window.scrollTo(0,0);return;}
