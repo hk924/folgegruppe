@@ -62,6 +62,21 @@ Grupper som ble satt opp før dette har ingen administrator. Da er alle
 administrator, som før, og den som styrer gruppa kan ta rollen under
 Innstillinger, Deg.
 
+## Bruksmåling
+
+`supabase_hendelser.sql` kjøres én gang i SQL Editor. Den lager tabellen `hendelser`,
+som appen skriver til: hvilken handling, hvem som gjorde den, og hvilken utgave av
+appen de kjørte. Den logger ikke hva som skrives i beskjeder, og ikke barnas navn.
+
+Tabellen har ingen select-policy med vilje. Med anon-nøkkelen kan man skrive, men ikke
+lese, så gruppa kan ikke se hverandres aktivitet og en nøkkel på avveie gir ingen
+historikk. Eneste vei til tallene er funksjonen `bruk_oppsummering`, som bare
+returnerer oppsummeringer, og som vises under Innstillinger for den som satte opp
+gruppa.
+
+Volum er rundt 300 rader i døgnet for åtte husstander. Rydd av og til med linjen
+nederst i sql-fila.
+
 ## Hvis appen sier "Får ikke tak i planen"
 
 Da er `SUPABASE_URL` og `SUPABASE_ANON_KEY` feil, eller tabellen mangler.

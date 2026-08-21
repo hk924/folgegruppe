@@ -103,6 +103,10 @@ th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.1em;c
 td{padding:9px 0;border-top:1px solid var(--line)}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .bar{height:6px;border-radius:4px;background:var(--kobolt);min-width:3px}
+.graf{display:flex;align-items:flex-end;gap:4px;height:46px;margin:12px 0 4px}
+.graf i{flex:1;background:var(--kobolt);border-radius:3px 3px 0 0;min-height:2px;opacity:.85}
+.graf i.naa{background:var(--oker)}
+.grafdager{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-soft)}
 
 label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
 input,textarea,select{width:100%;font-family:inherit;font-size:16px;padding:11px 12px;border:1px solid var(--line);
@@ -199,7 +203,7 @@ a.btn{text-decoration:none;display:inline-flex}
 /* Byggmerke. Endres ved hver deploy, og er det appen kjenner seg selv igjen på.
    Det må ligge i fila selv, ikke hentes, ellers kan en app som kjører fra cache
    tro at den er ny fordi serveren svarer nytt. */
-const BYGG = "2026-08-21-4";
+const BYGG = "2026-08-21-5";
 
 const SUPABASE_URL = "https://cdbazglchnghywskgiel.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkYmF6Z2xjaG5naHl3c2tnaWVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTA0MjMsImV4cCI6MjEwMjU2NjQyM30.0KUA4LWLbCV_IgcDfvnmXDuq28W3MEloEA-kQNOVfH0";
@@ -228,6 +232,8 @@ let __storageReady = false;
       async set(key, value, shared){ if(shared) throw feil("mangler oppsett", {oppsett:true}); return lokal.set(key, value); },
       async delete(key, shared){ if(shared) throw feil("mangler oppsett", {oppsett:true}); return lokal.del(key); }
     };
+    window.spor = async()=>{};
+    window.brukTall = async()=>{ throw feil("mangler oppsett", {oppsett:true}); };
     __storageReady = true;
     document.dispatchEvent(new Event("storageready"));
     return;
@@ -255,6 +261,22 @@ let __storageReady = false;
       return {key, deleted:true, shared:true};
     }
   };
+  /* Bruksmåling. Egen tabell, ikke i den delte planen, siden den skrives i sin helhet
+     og kringkastes til alle. Feil her skal aldri merkes i appen. */
+  window.spor = async (handling, detalj) => {
+    try{
+      let navn=null, hus=null, person=null;
+      try{ person=ME||null; navn=meName()||null; const f=myFam(); hus=f?husnavn(f):null; }catch(e){}
+      await supabase.from("hendelser").insert({person, navn, hus, handling,
+        detalj:detalj||null, bygg:typeof BYGG==="string"?BYGG:null});
+    }catch(e){}
+  };
+  window.brukTall = async (dager) => {
+    const {data, error} = await supabase.rpc("bruk_oppsummering", {dager:dager||7});
+    if(error) throw error;
+    return data;
+  };
+
   supabase.channel("app_kv_changes")
     .on("postgres_changes", {event:"*", schema:"public", table:"app_kv"}, ()=>{
       if(typeof load==="function"&&typeof render==="function"){load().then(render);}
@@ -269,6 +291,7 @@ const KEY="folgegruppe_v1", MEKEY="folgegruppe_meg";
 let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
 let ADMIN=false, LOADERR=null, HFASE=null;
 let MINVERSJON=null, NYVERSJON=false;
+let BRUK=null, BRUKFEIL=null;
 
 const blank=()=>({v:3,founderId:null,families:[],order:[],term:{start:"2026-08-17",end:"2026-12-18",meetTime:"08:15",
   perDay:2,reisetid:12,baneFra:"15:58",baneTil:"16:38",baneIntervall:8,
@@ -317,7 +340,7 @@ async function load(){
   try{const r=await window.storage.get(KEY,true);DATA=normaliser(JSON.parse(r.value));LOADERR=null;}
   catch(e){
     if(e&&e.tom){DATA=blank();LOADERR=null;}
-    else{DATA=DATA||blank();LOADERR=feiltype(e);}
+    else{DATA=DATA||blank();LOADERR=feiltype(e);try{if(window.spor)window.spor("feil",LOADERR);}catch(e2){}}
   }
   try{const r=await window.storage.get(MEKEY,false);ME=JSON.parse(r.value).id;}
   catch(e){ME=null;}
@@ -330,7 +353,7 @@ async function mutate(fn){
     try{const r=await window.storage.get(KEY,true);DATA=normaliser(JSON.parse(r.value));LOADERR=null;}
     catch(e){if(!e||!e.tom)throw e;}       // tom base er greit, alt annet stopper oss
     fn(DATA); await save();
-  }catch(e){e2=e;LOADERR=feiltype(e);}
+  }catch(e){e2=e;LOADERR=feiltype(e);try{if(window.spor)window.spor("feil",LOADERR);}catch(e3){}}
   BUSY=false; render();
   if(e2)toast(e2.oppsett?"Appen mangler databasekobling, ingenting ble lagret."
     :"Klarte ikke å lagre, ingenting er endret. Prøv igjen.");
@@ -356,6 +379,24 @@ async function sjekkVersjon(){
     if(!ny)return;
     if(!MINVERSJON)MINVERSJON=ny;                          // reserve, om byggmerket ikke er bumpet
     else if(ny!==MINVERSJON){NYVERSJON=true;render();}
+  }catch(e){}
+}
+
+/* Bare kjente, korte verdier havner i detalj. Aldri barne-id, aldri noe brukeren
+   har skrevet selv. */
+function sporDetalj(b,a){
+  if(a==="tab")return b.dataset.t||"";
+  if(a==="hfase")return b.dataset.f||"";
+  if(a==="bane")return b.dataset.t||"tom";
+  if(a==="meldav")return b.dataset.felt||"";
+  return "";
+}
+function sporApnet(){
+  try{
+    const n=Date.now(), sist=+(localStorage.getItem("folgegruppe_apnet")||0);
+    if(n-sist<1800000)return;                      // et bytte mellom apper er ikke en ny økt
+    localStorage.setItem("folgegruppe_apnet",String(n));
+    if(window.spor)window.spor("apnet");
   }catch(e){}
 }
 
@@ -1001,6 +1042,7 @@ function viewInnst(){
   h+='<div class="sheet"><div class="eyebrow">Sett opp planen</div>'+
     '<p class="hint" style="margin:8px 0 12px">Fordeler dagene fra i dag og fremover på nytt, tilfeldig, mellom familiene som er med nå. Dager som er passert rører den ikke. Dette overskriver bytter og avmeldinger fremover.</p>'+
     '<button class="btn" data-act="gen">Fordel dagene på nytt</button></div>';
+  h+=arkBruk();
   return h+omAppen()+"</div>";
 }
 
@@ -1012,7 +1054,10 @@ function needsMe(){return !ME||!myFam();}
 function omAppen(){
   return '<div class="sheet"><div class="eyebrow">Om appen</div><p class="hint" style="margin-top:8px">'+
     'Alle i gruppa ser og endrer samme plan. Ingen innlogging, s\u00e5 v\u00e6r litt varsom: endre bare dine egne dager. '+
-    'Trykk p\u00e5 tittelen \u00f8verst for \u00e5 hente inn siste versjon.</p></div>';
+    'Trykk p\u00e5 tittelen \u00f8verst for \u00e5 hente inn siste versjon.</p>'+
+    '<p class="hint" style="margin-top:10px">Appen logger hvilke funksjoner som brukes og n\u00e5r hver voksen '+
+    'sist var innom, slik at den kan forbedres. Den logger ikke hva som skrives i beskjeder. '+
+    'Bare den som satte opp gruppa ser tallene.</p></div>';
 }
 
 function skjemaFamilie(knapp){
@@ -1053,6 +1098,85 @@ function sheetHvemErDu(){
 function bannerHvemErDu(){
   return '<div class="banner">Du har ikke sagt hvem du er, s\u00e5 appen vet ikke hvilke dager som er dine. '+
     '<button class="btn ghost row" data-act="tab" data-t="innst" style="margin-top:10px">Velg deg selv</button></div>';
+}
+
+/* Hvor lenge siden, i ord. Brukes bare i bruksarket. */
+function siden(iso){
+  if(!iso)return "aldri";
+  const t=new Date(iso), n=new Date();
+  const d=Math.floor((n-t)/864e5);
+  const kl=t.toLocaleTimeString("nb-NO",{hour:"2-digit",minute:"2-digit"});
+  if(t.toDateString()===n.toDateString())return "i dag "+kl;
+  if(d<=1)return "i går "+kl;
+  if(d<7)return d+" dager siden";
+  return t.toLocaleDateString("nb-NO",{day:"numeric",month:"short"});
+}
+
+/* Lesbare navn på handlingene. Ukjente, altså nye, vises som de er. */
+const HANDLINGSNAVN={apnet:"åpnet appen",tab:"byttet fane",pm:"krysset av på hentelista",
+  motteikke:"møtte ikke opp",bane:"satte banetid",meldav:"meldte av barn",notat:"skrev beskjed",
+  drop:"vil bytte",take:"tok en dag",detErMeg:"sa det er meg",ics:"la dag i kalender",
+  icsall:"la alle dager i kalender",copy:"kopierte ukeplan",copylink:"kopierte lenken",
+  hfase:"byttet morgen og hjem",hday:"bladde mellom dager",week:"bladde mellom uker",
+  me:"valgte seg selv",switch:"byttet person",joinnew:"la til husstand",savecontact:"lagret familien",
+  savefams:"lagret lista",saveterm:"lagret termin",savebane:"lagret banen",gen:"fordelte dagene",
+  reload:"hentet inn på nytt",oppdater:"lastet ny versjon",hentbruk:"åpnet bruk",
+  showadmin:"åpnet admin",claim:"tok administrator",feil:"fikk feilmelding"};
+
+function arkBruk(){
+  let h='<div class="sheet"><div class="eyebrow">Bruk</div>';
+  if(BRUKFEIL){
+    h+='<p class="hint" style="margin:8px 0 12px">Fikk ikke tallene: '+esc(BRUKFEIL)+
+      '. Er tabellen laget? Kjør <em>supabase_hendelser.sql</em> i Supabase, under SQL Editor, én gang.</p>'+
+      '<button class="btn ghost" data-act="hentbruk">Prøv igjen</button></div>';
+    return h;
+  }
+  if(!BRUK){
+    h+='<p class="hint" style="margin:8px 0 12px">Hvor ofte appen brukes, av hvem, og hvilke '+
+      'funksjoner som faktisk tas i bruk. Hentes bare når du ber om det.</p>'+
+      '<button class="btn ghost" data-act="hentbruk">Hent tall</button></div>';
+    return h;
+  }
+  const pd=BRUK.perDag||[], maks=Math.max(1,...pd.map(x=>x.apninger||0));
+  h+='<p class="hint" style="margin:8px 0 0">Åpninger per dag, siste to uker.</p>'+
+    '<div class="graf">'+pd.map((x,i)=>'<i class="'+(i===pd.length-1?"naa":"")+
+      '" style="height:'+Math.round(6+(x.apninger||0)/maks*40)+'px" title="'+esc(String(x.dag))+
+      ": "+(x.apninger||0)+'"></i>').join("")+"</div>"+
+    '<div class="grafdager"><span>'+(pd.length?esc(kort(String(pd[0].dag))):"")+
+    '</span><span>i dag</span></div>';
+
+  /* Husstander uten en eneste rad er de som må ha SMS i stedet. */
+  const sett={}; (BRUK.personer||[]).forEach(x=>{if(x.hus)sett[x.hus]=true;});
+  const utenfor=DATA.families.filter(f=>!sett[husnavn(f)]);
+  if(utenfor.length){
+    h+='<p style="margin:16px 0 0;font-size:14px;color:var(--rust)"><strong>Har aldri åpnet appen:</strong> '+
+      esc(utenfor.map(husnavn).join(", "))+". De ser verken banetid eller beskjeder.</p>";
+  }
+  h+='<div class="eyebrow" style="margin-top:18px">Per voksen, siste '+(BRUK.dager||7)+" dager</div>";
+  (BRUK.personer||[]).forEach(x=>{
+    h+='<div class="day"><div class="who">'+esc(x.navn||"ukjent")+
+      '<small>'+esc(x.hus||"")+"</small></div>"+
+      '<span class="hentetall">'+(x.apninger||0)+" åpninger</span>"+
+      '<span class="tag">'+esc(siden(x.sist))+"</span></div>";
+  });
+  if(!(BRUK.personer||[]).length)h+='<p class="hint" style="margin:8px 0 0">Ingen hendelser ennå.</p>';
+
+  const hs=(BRUK.handlinger||[]).slice().sort((a,b)=>(b.antall||0)-(a.antall||0));
+  if(hs.length){
+    h+='<div class="eyebrow" style="margin-top:18px">Handlinger, siste '+(BRUK.dager||7)+" dager</div>";
+    const m=Math.max(1,...hs.map(x=>x.antall));
+    hs.forEach(x=>{h+='<div class="day"><div class="who" style="font-size:14px">'+
+      esc(HANDLINGSNAVN[x.handling]||x.handling)+
+      '<div class="bar" style="width:'+Math.round(x.antall/m*100)+'%;margin-top:6px"></div></div>'+
+      '<span class="hentetall">'+x.antall+"</span></div>";});
+  }
+  const bg=BRUK.bygg||[];
+  if(bg.length){
+    h+='<p class="hint" style="margin:16px 0 0">Utgaver i bruk: '+
+      bg.map(x=>esc(x.bygg)+" ("+x.personer+")").join(", ")+
+      (bg.length>1?". De på en gammel utgave får banner om å laste inn den nye.":"")+"</p>";
+  }
+  return h+'<button class="btn ghost" style="margin-top:16px" data-act="hentbruk">Oppdater tallene</button></div>';
 }
 
 function viewFeil(){
@@ -1127,6 +1251,7 @@ function ukeTekst(){
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-act]");if(!b)return;
   const a=b.dataset.act;
+  try{if(window.spor)window.spor(a,sporDetalj(b,a));}catch(e){}  // uten await, og kan ikke velte handlingen
   if(a==="tab"){TAB=b.dataset.t;WEEKOFF=0;render();window.scrollTo(0,0);return;}
   if(a==="week"){WEEKOFF+=+b.dataset.v;render();return;}
   if(a==="me"){setMe(b.dataset.id);TAB="hjem";return;}
@@ -1141,6 +1266,12 @@ document.addEventListener("click",async e=>{
   if(a==="copylink"){
     try{await navigator.clipboard.writeText(location.href);toast("Lenken er kopiert");}
     catch(err){toast(location.href);}return;}
+  if(a==="hentbruk"){
+    if(!isFounder()){toast("Bare administrator ser dette");return;}
+    BRUKFEIL=null;
+    try{BRUK=await window.brukTall(7);}
+    catch(err){BRUK=null;BRUKFEIL=(err&&err.message)||"ukjent feil";}
+    render();return;}
   if(a==="oppdater"){location.reload();return;}
   if(a==="reload"){await load();render();sjekkVersjon();toast("Oppdatert");return;}
   if(a==="copy"){try{await navigator.clipboard.writeText(ukeTekst());toast("Ukeplanen er kopiert");}
@@ -1375,6 +1506,7 @@ document.addEventListener("click",async e=>{
   if(needsMe())TAB="innst";   // ikke valgt person på denne telefonen, start der man ordner det
   render();
   sjekkVersjon();
+  sporApnet();
 })();
 setInterval(sjekkVersjon,3600000);
 setInterval(async()=>{if(document.visibilityState==="visible"&&!BUSY&&TAB!=="innst"){
@@ -1383,6 +1515,7 @@ setInterval(async()=>{if(document.visibilityState==="visible"&&!BUSY&&TAB!=="inn
 document.addEventListener("visibilitychange",async()=>{
   if(document.visibilityState!=="visible")return;
   sjekkVersjon();                       // her fanges den gjenopptatte hjemskjerm-appen
+  sporApnet();
   if(TAB!=="innst"){await load();render();}});
 </script>
 </body>
