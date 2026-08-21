@@ -152,6 +152,13 @@ textarea{min-height:150px;line-height:1.5}
   font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink);min-height:42px}
 .brikker button[aria-pressed="true"]{background:var(--kobolt);border-color:var(--kobolt);color:#fff;font-weight:600}
 .stort{font-family:var(--display);font-size:22px;line-height:1.15;margin:8px 0 2px;letter-spacing:-.01em}
+.tall{display:flex;align-items:baseline;gap:11px;margin:8px 0 2px}
+.tall b{font-family:var(--display);font-size:44px;line-height:.95;font-weight:600;letter-spacing:-.03em}
+.tall span{font-size:15px;color:var(--ink-soft)}
+.navnebrikker{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.navnebrikker button{background:#fff;border:1px solid var(--line);border-radius:20px;padding:8px 13px;
+  font-size:15px;color:var(--ink);min-height:40px}
+.navnebrikker button:active{background:var(--chalk)}
 
 /* hentelista: én linje per barn, hele linja er trykkflaten */
 .hentelinje{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;
@@ -422,6 +429,12 @@ function ankomst(bane){
 }
 /* status for et barn i dag, brukt både i lista og i meldingen til gruppa */
 function hentesIDag(dt){return alleBarn().filter(k=>barnStatus(dt,k.id).pm!=="ikke");}
+/* Om morgenen er tallet det som betyr noe: hvor mange barn har du med deg.
+   Det utledes, så ingen må krysse av noen. Bare avvikene trykkes. */
+function medIDag(dt){return alleBarn().filter(k=>{const a=barnStatus(dt,k.id).am;
+  return a!=="ikke"&&a!=="motteikke";});}
+function ikkeMedIDag(dt){return alleBarn().filter(k=>{const a=barnStatus(dt,k.id).am;
+  return a==="ikke"||a==="motteikke";});}
 function avmeldtIDag(dt){return alleBarn().filter(k=>barnStatus(dt,k.id).pm==="ikke");}
 
 /* ---------- kalender (ics) ---------- */
@@ -706,9 +719,6 @@ function kortMineBarn(dt,fs){
         (st.pm==="ikke"?"Skal hentes likevel":"Skal ikke hentes")+"</button>"+
         (st.am==="ikke"&&st.pm==="ikke"?"":
           '<button class="btn ghost row" data-act="meldav" data-d="'+dt+'" data-k="'+k.id+'" data-felt="begge">Borte hele dagen</button>')+
-        (fs==="morgen"&&st.am!=="ikke"
-          ? '<button class="btn ghost row'+(st.am==="levert"?" here":"")+'" data-act="levert" data-d="'+dt+
-            '" data-k="'+k.id+'">'+(st.am==="levert"?"Levert ✓":"Levert til gruppa")+"</button>":"")+
         "</div>"+
         '<label for="notat-'+k.id+'" style="font-size:12px;margin:12px 0 5px">Beskjed til de som henter (valgfritt)</label>'+
         '<input id="notat-'+k.id+'" value="'+esc(st.notat||"")+'" placeholder="farmor henter i dag">'+
@@ -720,30 +730,41 @@ function kortMineBarn(dt,fs){
 }
 
 function fasenMorgen(dt){
-  const t=DATA.term.meetTime||"08:15";
+  const t=DATA.term.meetTime||"08:15", kryss=kanKrysse(dt);
+  const med=medIDag(dt), utenfor=ikkeMedIDag(dt);
+  /* Tallet først. Det er det man trenger å vite når man står på perrongen. */
   let h='<div class="sheet"><div class="eyebrow">Om morgenen</div>'+
-    '<div class="stort">Perrongen '+esc(t)+"</div>";
+    '<div class="tall"><b>'+med.length+"</b><span>barn "+(kryss?"med deg":"med gruppa")+
+    (dt===today()?" i dag":"")+"</span></div>";
+  if(utenfor.length){
+    h+='<p style="margin:10px 0 0;font-size:14px">Ikke med: '+utenfor.map(k=>{
+      const st=barnStatus(dt,k.id);
+      return "<strong>"+esc(k.name)+"</strong>"+
+        (st.am==="motteikke"?" (møtte ikke)":"")+(st.notat?" ("+esc(st.notat)+")":"");
+    }).join(", ")+".</p>";
+  }else{
+    h+='<p class="hint" style="margin:10px 0 0">Alle barna er med som vanlig.</p>';
+  }
+  h+='<p class="hint" style="margin:10px 0 0">Perrongen '+esc(t);
   if(dt===today()){
     const naa=new Date(), min=tilMin(t)-(naa.getHours()*60+naa.getMinutes());
-    h+='<p class="hint" style="margin:2px 0 0">'+(min>0?"Om "+min+" minutt"+(min===1?"":"er"):
-      min>-90?"Gruppa har dratt":"")+"</p>";
+    h+=min>0?", om "+min+" minutt"+(min===1?"":"er"):min>-90?", gruppa har dratt":"";
   }
-  h+='<p class="hint" style="margin:10px 0 0">Kommer du for sent, leverer du selv. '+
-    "Appen holder ikke regnskap med det.</p></div>";
+  h+=". Kommer du for sent, leverer du selv.</p>";
+  if(kryss&&dt>=today()&&med.length){
+    h+='<p class="hint" style="margin:16px 0 0">Møtte noen ikke opp? Trykk navnet, så går tallet ned.</p>'+
+      '<div class="navnebrikker">'+med.map(k=>'<button data-act="motteikke" data-d="'+dt+
+      '" data-k="'+k.id+'">'+esc(k.name)+"</button>").join("")+"</div>";
+  }
+  if(kryss&&utenfor.some(k=>barnStatus(dt,k.id).am==="motteikke")){
+    h+='<div class="navnebrikker" style="margin-top:12px">'+utenfor
+      .filter(k=>barnStatus(dt,k.id).am==="motteikke")
+      .map(k=>'<button data-act="motteikke" data-d="'+dt+'" data-k="'+k.id+
+        '">'+esc(k.name)+" kom likevel</button>").join("")+"</div>";
+  }
+  h+="</div>";
   h+=kortMineBarn(dt,"morgen");
-  const avm=alleBarn().filter(k=>{const st=barnStatus(dt,k.id);return st.am==="ikke"||st.pm==="ikke";});
-  h+='<div class="sheet"><div class="eyebrow">Beskjeder i dag</div>';
-  if(!avm.length)h+='<p class="hint" style="margin:8px 0 0">Ingen beskjeder. Alle barna er med som vanlig.</p>';
-  else avm.forEach(k=>{
-    const st=barnStatus(dt,k.id), hva=[];
-    if(st.am==="ikke")hva.push("ikke med om morgenen");
-    if(st.pm==="ikke")hva.push("skal ikke hentes");
-    h+='<div class="avmeldt"><b>'+esc(k.name)+"</b><span>"+esc(hva.join(", "))+
-      (st.notat?" · "+esc(st.notat):"")+"</span></div>";
-  });
-  const levert=alleBarn().filter(k=>barnStatus(dt,k.id).am==="levert").length;
-  if(levert)h+='<p class="hint" style="margin:12px 0 0">'+levert+" barn er registrert levert til gruppa av foreldrene.</p>";
-  return h+"</div>";
+  return h;
 }
 
 function fasenHjem(dt){
@@ -772,7 +793,8 @@ function fasenHjem(dt){
   skal.forEach(k=>{
     const st=barnStatus(dt,k.id), av=st.pm==="hentet", hus=fam(k.familyId);
     const person=vaktPerson(dt,k.familyId);
-    const hoyre=st.am==="ikke"?'<span class="tag open">kom selv</span>':
+    const hoyre=st.am==="motteikke"?'<span class="tag open">møtte ikke</span>':
+      st.am==="ikke"?'<span class="tag open">kom selv</span>':
       '<span class="vk">'+esc(person?person.name.split(" ")[0]:voksne(hus))+"</span>";
     const inner='<span class="boks"></span><span class="bn">'+esc(k.name)+"</span>"+hoyre+
       (st.notat?'<span class="tag">beskjed</span>':"");
@@ -1264,14 +1286,16 @@ document.addEventListener("click",async e=>{
       }
       dagLogg(s,dt,tekst+" ("+nm+")");});
     toast(tekst);return;}
-  if(a==="levert"){
+  if(a==="motteikke"){
     const dt=b.dataset.d, kid=b.dataset.k;
-    if(!erMinBarn(kid)&&!kanKrysse(dt)){toast("Du kan bare gjøre dette for dine egne barn");return;}
+    if(!kanKrysse(dt)){toast("Det er de på vakt som teller barna");return;}
     const navn=(alleBarn().find(k=>k.id===kid)||{}).name||"Barnet";
+    let av=false;
     await mutate(s=>{const d=iDag(s,dt);const bs=d.barn[kid]=d.barn[kid]||{};
-      if(bs.am==="levert"){delete bs.am;dagLogg(s,dt,navn+" er ikke levert likevel");}
-      else{bs.am="levert";dagLogg(s,dt,navn+" er levert til gruppa");}});
-    return;}
+      if(bs.am==="motteikke"){delete bs.am;dagLogg(s,dt,navn+" kom likevel");}
+      else{bs.am="motteikke";av=true;dagLogg(s,dt,navn+" møtte ikke opp");}
+      if(!Object.keys(bs).length)delete d.barn[kid];});
+    toast(av?navn+" er ikke med":navn+" er med igjen");return;}
   if(a==="notat"){
     const dt=b.dataset.d, kid=b.dataset.k;
     if(!erMinBarn(kid)&&!kanKrysse(dt)){toast("Du kan bare skrive beskjed for dine egne barn");return;}
