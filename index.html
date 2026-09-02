@@ -86,6 +86,11 @@ a{color:var(--kobolt)}
 .slot{display:flex;align-items:center;gap:10px;min-width:0}
 .slot+.slot{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .slot.open .who{color:var(--rust)}
+/* liten merkelapp foran navnet når dagen er delt i levering og henting */
+.who .halv{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--ink-soft);font-weight:600;margin-right:6px}
+.brikker.bytte{margin-top:10px}
+.brikker.bytte button{font-size:13px;padding:8px 11px}
 .tag{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;border:1px solid var(--line);color:var(--ink-soft);white-space:nowrap}
 .tag.you{background:var(--oker);border-color:var(--oker);color:#3A2A00}
 .tag.open{background:#fff;border-color:var(--rust);color:var(--rust)}
@@ -203,7 +208,7 @@ a.btn{text-decoration:none;display:inline-flex}
 /* Byggmerke. Endres ved hver deploy, og er det appen kjenner seg selv igjen på.
    Det må ligge i fila selv, ikke hentes, ellers kan en app som kjører fra cache
    tro at den er ny fordi serveren svarer nytt. */
-const BYGG = "2026-08-21-5";
+const BYGG = "2026-09-02-1";
 
 const SUPABASE_URL = "https://cdbazglchnghywskgiel.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkYmF6Z2xjaG5naHl3c2tnaWVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTA0MjMsImV4cCI6MjEwMjU2NjQyM30.0KUA4LWLbCV_IgcDfvnmXDuq28W3MEloEA-kQNOVfH0";
@@ -289,7 +294,7 @@ let __storageReady = false;
 /* ---------- lagring ---------- */
 const KEY="folgegruppe_v1", MEKEY="folgegruppe_meg";
 let DATA=null, ME=null, TAB="hjem", WEEKOFF=0, BUSY=false, HDAY=null;
-let ADMIN=false, LOADERR=null, HFASE=null;
+let ADMIN=false, LOADERR=null, HFASE=null, BYTTE=null;
 let MINVERSJON=null, NYVERSJON=false;
 let BRUK=null, BRUKFEIL=null;
 
@@ -389,6 +394,8 @@ function sporDetalj(b,a){
   if(a==="hfase")return b.dataset.f||"";
   if(a==="bane")return b.dataset.t||"tom";
   if(a==="meldav")return b.dataset.felt||"";
+  /* hel eller halv, så vi kan se om halve vakter faktisk blir brukt */
+  if(a==="drop"||a==="take")return b.dataset.felt||"hel";
   return "";
 }
 function sporApnet(){
@@ -438,10 +445,73 @@ function plassHus(dt){return plasser(dt).map(s=>s.familyId?fam(s.familyId):null)
 function voksne(f){return f?f.members.map(m=>m.name.split(" ")[0]).join(" / "):"";}
 /* kort etikett for dagen: husstandene som går, skilt med pluss */
 function navn(dt){const l=plassHus(dt).filter(Boolean).map(husnavn);return l.length?l.join(" + "):null;}
-function isMine(dt){const f=myFam();return !!f&&plasser(dt).some(s=>s.familyId===f.id);}
-function minPlass(dt){const f=myFam();if(!f)return -1;return plasser(dt).findIndex(s=>s.familyId===f.id);}
-function ledige(dt){return plasser(dt).filter(s=>!s.familyId).length;}
-function medMeg(dt){const f=myFam();return plassHus(dt).filter(x=>x&&(!f||x.id!==f.id));}
+
+/* ---------- halve vakter ----------
+   En plass eier hele dagen, som før: {familyId}. Byttes bare den ene halvdelen bort,
+   legges halvdelen på som et unntak oppå eierskapet:
+     {familyId:"f1", pm:{familyId:"f3", original:"f1"}}   f1 leverer, f3 henter
+     {familyId:"f1", pm:{familyId:null, original:"f1"}}   hentingen ligger ute for bytte
+   Mangler am og pm, gjør eieren begge halvdelene. Alle dager fra før har ingen av dem,
+   og oppfører seg derfor presist som i dag. */
+const FASER=[["am","levering","leveringen"],["pm","henting","hentingen"]];
+const FELT=FASER.map(x=>x[0]);
+const faseFelt=fs=>fs==="morgen"?"am":"pm";
+const fasenavn=(felt,bestemt)=>{const f=FASER.find(x=>x[0]===felt);return f?f[bestemt?2:1]:"";};
+/* husstanden som har ansvaret for en halvdel, enten via unntaket eller som eier av dagen */
+function ansvarId(dt,i,felt){const sl=plasser(dt)[i];if(!sl)return null;
+  const h=sl[felt];return h?(h.familyId||null):(sl.familyId||null);}
+function ansvar(dt,i,felt){const id=ansvarId(dt,i,felt);return id?fam(id):null;}
+/* hvem halvdelen egentlig tilhørte, for «dekker for» og «vil bytte» */
+function oppriId(dt,i,felt){const sl=plasser(dt)[i];if(!sl)return null;
+  return (sl[felt]&&sl[felt].original)||sl.original||null;}
+function erDelt(dt,i){const sl=plasser(dt)[i];return !!sl&&(!!sl.am||!!sl.pm);}
+/* Det som mangler en voksen. felt=null betyr hele plassen, som før halve vakter fantes. */
+function hull(dt){
+  const ut=[];
+  plasser(dt).forEach((sl,i)=>{
+    if(!sl.am&&!sl.pm){if(!sl.familyId)ut.push({i,felt:null});return;}
+    FELT.forEach(k=>{if(!ansvarId(dt,i,k))ut.push({i,felt:k});});
+  });
+  return ut;
+}
+function ledige(dt){return hull(dt).length;}
+/* halvdelene som er mine i dag, i rekkefølgen levering, henting */
+function mineFelt(dt){const f=myFam();if(!f)return [];
+  return FELT.filter(k=>plasser(dt).some((sl,i)=>ansvarId(dt,i,k)===f.id));}
+function isMine(dt){return mineFelt(dt).length>0;}
+function erMinFase(dt,felt){const f=myFam();
+  return !!f&&plasser(dt).some((sl,i)=>ansvarId(dt,i,felt)===f.id);}
+function minPlass(dt){const f=myFam();if(!f)return -1;
+  return plasser(dt).findIndex((sl,i)=>FELT.some(k=>ansvarId(dt,i,k)===f.id));}
+function medMeg(dt,felt){const f=myFam(), ut=[];
+  plasser(dt).forEach((sl,i)=>(felt?[felt]:FELT).forEach(k=>{
+    const x=ansvar(dt,i,k);
+    if(x&&(!f||x.id!==f.id)&&!ut.some(y=>y.id===x.id))ut.push(x);}));
+  return ut;}
+/* Står begge halvdelene på samme husstand, er dagen hel igjen. Da skal den også se hel ut. */
+function forenkle(sl){
+  if(!sl.am&&!sl.pm)return;
+  const a=sl.am?sl.am.familyId:sl.familyId, p=sl.pm?sl.pm.familyId:sl.familyId;
+  if(!a||a!==p)return;
+  const o=(sl.am&&sl.am.original)||(sl.pm&&sl.pm.original)||sl.original;
+  delete sl.am;delete sl.pm;sl.familyId=a;
+  if(o&&o!==a)sl.original=o;else delete sl.original;
+}
+/* Legger ut en halvdel, eller hele dagen når begge halvdelene er mine.
+   Returnerer halvdelene som faktisk ble lagt ut. */
+function leggUt(sl,fid,felt){
+  const eier=k=>sl[k]?(sl[k].familyId||null):(sl.familyId||null);
+  const mine=(felt?[felt]:FELT).filter(k=>eier(k)===fid);
+  if(!mine.length)return [];
+  if(mine.length===2){
+    sl.original=sl.original||sl.familyId||fid;sl.familyId=null;delete sl.am;delete sl.pm;
+    return FELT.slice();
+  }
+  const k=mine[0];
+  sl[k]={familyId:null,original:(sl[k]&&sl[k].original)||sl.original||sl.familyId||fid};
+  return [k];
+}
+const stor=s=>s?s[0].toUpperCase()+s.slice(1):"";
 function openDays(){return skoledager().filter(dt=>dt>=today()&&ledige(dt)>0);}
 function myNext(){return skoledager().find(dt=>dt>=today()&&isMine(dt))||null;}
 const nid=p=>p+Math.random().toString(36).slice(2,8);
@@ -480,8 +550,11 @@ function ringEn(navn,nr){
   if(!nr)return "";
   return '<a class="btn ghost row" href="tel:'+nr.replace(/[^\d+]/g,"")+'">Ring '+esc(navn||nr)+"</a>";
 }
-/* de på vakt i dag krysser hentelista og setter bane. Administrator er reserve. */
-function kanKrysse(dt){return isMine(dt)||isFounder();}
+/* De på vakt i dag krysser hentelista og setter bane. Administrator er reserve.
+   Har noen bare den ene halvdelen, er det bare den halvdelens knapper de får. */
+function kanKrysse(dt,fs){return erMinFase(dt,faseFelt(fs||"hjem"))||isFounder();}
+/* for beskjeder om barn, der begge halvdelene av dagen er like relevante */
+function kanKrysseNoe(dt){return isMine(dt)||isFounder();}
 function erMinBarn(kid){return mineBarn().some(k=>k.id===kid);}
 
 const tilMin=t=>{const[h,m]=String(t||"0:0").split(":").map(Number);return (h||0)*60+(m||0);};
@@ -508,8 +581,8 @@ function avmeldtIDag(dt){return alleBarn().filter(k=>barnStatus(dt,k.id).pm==="i
 
 /* ---------- kalender (ics) ---------- */
 const pad2=n=>String(n).padStart(2,"0");
-function icsEvent(dt,title,desc){
-  const [hh,mm]=(DATA.term.meetTime||"08:15").split(":").map(Number);
+function icsEvent(dt,title,desc,tid){
+  const [hh,mm]=(tid||DATA.term.meetTime||"08:15").split(":").map(Number);
   const start=d(dt);start.setUTCHours(hh,mm,0,0);
   const end=new Date(start.getTime()+30*60000);
   const f=x=>x.getUTCFullYear()+pad2(x.getUTCMonth()+1)+pad2(x.getUTCDate())+"T"+pad2(x.getUTCHours())+pad2(x.getUTCMinutes())+"00";
@@ -517,10 +590,19 @@ function icsEvent(dt,title,desc){
     "SUMMARY:"+title,"DESCRIPTION:"+(desc||""),"BEGIN:VALARM","TRIGGER:-PT15M","ACTION:DISPLAY",
     "DESCRIPTION:Påminnelse","END:VALARM","END:VEVENT"].join("\r\n");
 }
-function icsMed(dt){
-  const andre=medMeg(dt);
+function icsMed(dt,felt){
+  const andre=medMeg(dt,felt);
   return (andre.length?"Sammen med "+andre.map(x=>husnavn(x)+" ("+voksne(x)+")").join(" og ")+". ":"")+
-    (ledige(dt)?"Én plass står ledig. ":"")+"Husk å levere barna ved Steinerskolen.";
+    (ledige(dt)?"Én plass står ledig. ":"")+
+    (felt==="pm"?"Husk å hente barna og ta banen hjem."
+      :"Husk å levere barna ved Steinerskolen.");
+}
+/* Har du bare halve dagen, skal kalenderen si det, og ligge på riktig klokkeslett. */
+function icsForDag(dt){
+  const fs=mineFelt(dt);
+  if(fs.length!==1)return [icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))];
+  if(fs[0]==="am")return [icsEvent(dt,"Følgegruppa: du leverer",icsMed(dt,"am"))];
+  return [icsEvent(dt,"Følgegruppa: du henter",icsMed(dt,"pm"),DATA.term.baneFra||"15:58")];
 }
 function downloadICS(filename,events){
   const body=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Følgegruppa//NO","CALSCALE:GREGORIAN",
@@ -636,32 +718,56 @@ function dagListe(fra,maksUker){
   return {html:h,igjen:igjen};
 }
 
+/* Én linje i en dag: hele plassen når felt er null, ellers den ene halvdelen. */
+function slotLinje(dt,i,felt,past,ctx){
+  const minF=myFam();
+  const family=felt?ansvar(dt,i,felt):((plasser(dt)[i]||{}).familyId?fam(plasser(dt)[i].familyId):null);
+  const opp=felt?oppriId(dt,i,felt):(plasser(dt)[i]||{}).original;
+  const mine=!!(minF&&family&&family.id===minF.id);
+  let tag="";
+  if(!family)tag='<span class="tag open">mangler</span>';
+  else if(mine)tag='<span class="tag you">deg</span>';
+  else if(opp&&opp!==family.id)tag='<span class="tag">byttet</span>';
+  let act="";
+  if(!past&&ctx!=="flat"){
+    if(!family)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'" data-i="'+i+'" data-felt="'+
+      (felt||"")+'">Jeg tar '+(felt?fasenavn(felt,true):"den")+"</button>";
+    /* Har jeg hele dagen, er det noe å velge, og da spør vi. Har jeg bare halvparten, er det ikke. */
+    else if(mine&&!felt)act='<button class="btn ghost row" data-act="byttemeny" data-d="'+dt+
+      '" data-i="'+i+'">Vil bytte</button>';
+    else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'" data-i="'+i+
+      '" data-felt="'+felt+'">Vil bytte</button>';
+  }
+  const merke=felt?'<span class="halv">'+fasenavn(felt)+"</span>":"";
+  const who=family
+    ? merke+esc(husnavn(family))+'<small>'+esc(voksne(family))+
+      (opp&&opp!==family.id&&fam(opp)?" dekker for "+esc(husnavn(fam(opp))):"")+"</small>"
+    : merke+"Mangler en voksen"+(opp&&fam(opp)
+        ?'<small>'+esc(husnavn(fam(opp)))+" vil bytte</small>":"");
+  const naer=dt<=add(today(),1);            // ringeknapp bare når det er nå det gjelder
+  const call=(!past&&naer&&!mine&&family&&ctx!=="flat")?ringKort(family):"";
+  return '<div class="slot'+(family?"":" open")+'"><div class="who">'+who+"</div>"+tag+call+act+"</div>";
+}
+/* De tre valgene, som brikker under dagen. Bare synlig for den som nettopp trykket «Vil bytte». */
+function byttebrikker(dt,i){
+  return '<div class="brikker bytte">'+
+    '<button data-act="drop" data-d="'+dt+'" data-i="'+i+'" data-felt="">Hele dagen</button>'+
+    FASER.map(([k,,best])=>'<button data-act="drop" data-d="'+dt+'" data-i="'+i+'" data-felt="'+k+
+      '">Bare '+best+"</button>").join("")+
+    '<button data-act="byttelukk">Avbryt</button></div>';
+}
+
 function dayRow(dt,ctx){
   const f=ferie(dt);
   if(f)return '<div class="holiday">'+esc(f.label)+", "+kort(dt)+"</div>";
   const ps=plasser(dt);
   if(!ps.length)return "";
-  const past=dt<today(), minF=myFam();
+  const past=dt<today();
   const linjer=ps.map((sl,i)=>{
-    const family=sl.familyId?fam(sl.familyId):null;
-    const mine=!!(minF&&family&&family.id===minF.id);
-    let tag="";
-    if(!family)tag='<span class="tag open">mangler</span>';
-    else if(mine)tag='<span class="tag you">deg</span>';
-    else if(sl.original&&sl.original!==family.id)tag='<span class="tag">byttet</span>';
-    let act="";
-    if(!past&&ctx!=="flat"){
-      if(!family)act='<button class="btn ghost row" data-act="take" data-d="'+dt+'" data-i="'+i+'">Jeg tar den</button>';
-      else if(mine)act='<button class="btn ghost row" data-act="drop" data-d="'+dt+'" data-i="'+i+'">Vil bytte</button>';
-    }
-    const who=family
-      ? esc(husnavn(family))+'<small>'+esc(voksne(family))+
-        (sl.original&&sl.original!==family.id&&fam(sl.original)?" dekker for "+esc(husnavn(fam(sl.original))):"")+"</small>"
-      : "Mangler en voksen"+(sl.original&&fam(sl.original)
-          ?'<small>'+esc(husnavn(fam(sl.original)))+" vil bytte</small>":"");
-    const naer=dt<=add(today(),1);            // ringeknapp bare når det er nå det gjelder
-    const call=(!past&&naer&&!mine&&family&&ctx!=="flat")?ringKort(family):"";
-    return '<div class="slot'+(family?"":" open")+'"><div class="who">'+who+"</div>"+tag+call+act+"</div>";
+    const rader=erDelt(dt,i)
+      ? FELT.map(k=>slotLinje(dt,i,k,past,ctx)).join("")
+      : slotLinje(dt,i,null,past,ctx);
+    return rader+(BYTTE===dt+"|"+i&&ctx!=="flat"?byttebrikker(dt,i):"");
   }).join("");
   return '<div class="day'+(isMine(dt)?" mine":"")+(ledige(dt)?" open":"")+'" style="'+(past?"opacity:.45":"")+'">'+
     '<div class="dt"><b>'+esc(DAGK[dow(dt)])+" "+d(dt).getUTCDate()+'.</b>'+MND[d(dt).getUTCMonth()].slice(0,3)+'</div>'+
@@ -673,9 +779,15 @@ function viewHjem(){
   const nx=myNext(), open=openDays(), f=myFam();
   let h='<div class="view">';
   if(open.length){
-    const mangler=open.reduce((n,dt)=>n+ledige(dt),0);
-    h+='<div class="banner"><strong>'+mangler+" ledig"+(mangler===1?" plass":"e plasser")+" på "+
-      open.length+(open.length===1?" dag":" dager")+'.</strong> Trykk «Jeg tar den» på en dag du kan.</div>';
+    /* Hele dager og halve teller ikke likt, så vi sier hva slags det er. */
+    const t={hel:0,am:0,pm:0};
+    open.forEach(dt=>hull(dt).forEach(x=>t[x.felt||"hel"]++));
+    const deler=[];
+    if(t.hel)deler.push(t.hel+(t.hel===1?" hel dag":" hele dager"));
+    if(t.am)deler.push(t.am+(t.am===1?" levering":" leveringer"));
+    if(t.pm)deler.push(t.pm+(t.pm===1?" henting":" hentinger"));
+    h+='<div class="banner"><strong>'+deler.join(", ")+" mangler en voksen, på "+
+      open.length+(open.length===1?" dag":" dager")+'.</strong> Trykk «Jeg tar den» på noe du kan.</div>';
   }
   const iD=today(), dP=dagPost(iD), harVakt=isMine(iD), skoledag=plasser(iD).length>0;
   if(skoledag&&dP&&dP.bane&&!harVakt){
@@ -685,9 +797,13 @@ function viewHjem(){
   }
   if(skoledag&&harVakt){
     const kryss=hentesIDag(iD).filter(k=>barnStatus(iD,k.id).pm==="hentet").length;
+    const mf=mineFelt(iD), halv=mf.length===1?mf[0]:null;
+    /* Banetiden hører til hjemturen. Har du bare leveringen, skal du ikke minnes om den. */
+    const om=halv==="am"?""
+      :" "+(dP&&dP.bane?"Banen er satt til "+esc(dP.bane)+".":"Husk å sette banetid når du vet den.");
     h+='<div class="banner" style="background:rgba(216,162,43,.16);border-color:rgba(216,162,43,.5);color:#5A4300">'+
-      '<strong>Du har vakt i dag.</strong> '+(dP&&dP.bane?"Banen er satt til "+esc(dP.bane)+".":"Husk å sette banetid når du vet den.")+
-      (kryss?" "+kryss+" barn er krysset av.":"")+
+      "<strong>Du har "+(halv?fasenavn(halv,true):"vakt")+" i dag.</strong>"+om+
+      (halv!=="am"&&kryss?" "+kryss+" barn er krysset av.":"")+
       '<button class="btn ghost row" style="margin-top:10px" data-act="tab" data-t="henting">Åpne hentemodus</button></div>';
   }
   const mineMeldt=mineBarn().filter(k=>{const st=barnStatus(iD,k.id);return st.am==="ikke"||st.pm==="ikke";});
@@ -699,8 +815,10 @@ function viewHjem(){
   h+='<div class="sheet slim"><div class="eyebrow">Din neste dag</div>';
   if(nx){
     const dif=Math.round((d(nx)-d(today()))/864e5), med=medMeg(nx), led=ledige(nx);
+    const mf=mineFelt(nx), halv=mf.length===1?mf[0]:null;
     h+='<div class="bigdate">'+lang(nx)+"</div>"+wobble(220)+
       '<div class="countdown">'+(dif===0?"I dag":dif===1?"I morgen":"Om "+dif+" dager")+", uke "+uke(nx)+
+      (halv?" · bare "+fasenavn(halv,true):"")+
       (med.length?" · sammen med "+esc(med.map(husnavn).join(" og "))+" ("+esc(med.map(voksne).join(", "))+")":"")+
       (led?' · <span style="color:var(--rust)">'+led+" plass"+(led===1?"":"er")+" ledig</span>":"")+"</div>"+
       (f&&f.members.length>1&&(!vaktPerson(nx,f.id)||vaktPerson(nx,f.id).id!==ME)
@@ -709,10 +827,11 @@ function viewHjem(){
             :"Ingen i husstanden har sagt hvem som går.")+
           ' <button class="btn ghost row" style="margin-top:8px" data-act="detErMeg" data-d="'+nx+
           '" data-h="'+f.id+'">Det er meg som går</button></p>':"")+
-      '<div class="btnrow tight"><button class="btn warn row" data-act="drop" data-d="'+nx+
-      '" data-i="'+minPlass(nx)+'">Vil bytte</button>'+
+      '<div class="btnrow tight"><button class="btn warn row" data-act="'+(halv?"drop":"byttemeny")+
+      '" data-d="'+nx+'" data-i="'+minPlass(nx)+'" data-felt="'+(halv||"")+'">Vil bytte</button>'+
       '<button class="btn ghost row" data-act="ics" data-d="'+nx+'">'+kalIkon+'Legg i kalender</button>'+
-      med.map(ringKort).join("")+"</div>";
+      med.map(ringKort).join("")+"</div>"+
+      (BYTTE===nx+"|"+minPlass(nx)?byttebrikker(nx,minPlass(nx)):"");
   }else{
     h+='<div class="bigdate none">Ingen dager igjen på deg</div>'+
       '<div class="countdown" style="margin-bottom:0">Du står ikke oppført på flere dager denne terminen.</div>';
@@ -735,29 +854,33 @@ function fase(dt){
   return new Date().getHours()<12?"morgen":"hjem";
 }
 
-function blokkVakt(dt){
+/* Vaktblokka viser den som har den halvdelen man ser på nå, ikke begge to. */
+function blokkVakt(dt,fs){
   const ps=plasser(dt);
   if(!ps.length)return '<p class="hint" style="margin:10px 0 0">Ingen er satt opp denne dagen.</p>';
-  const minF=myFam();
+  const minF=myFam(), felt=faseFelt(fs);
   return ps.map((sl,i)=>{
-    if(!sl.familyId){
-      return '<div class="vakt tom"><div class="nv">Mangler en voksen'+
-        (sl.original&&fam(sl.original)?'<small>'+esc(husnavn(fam(sl.original)))+" vil bytte</small>":"")+"</div>"+
-        (dt>=today()?'<button class="btn ghost row" data-act="take" data-d="'+dt+'" data-i="'+i+'">Jeg tar den</button>':"")+
+    const delt=erDelt(dt,i), bare=delt?", bare "+fasenavn(felt,true):"";
+    const ansvarlig=ansvar(dt,i,felt), opp=delt?oppriId(dt,i,felt):sl.original;
+    if(!ansvarlig){
+      return '<div class="vakt tom"><div class="nv">Mangler en voksen til '+fasenavn(felt,true)+
+        (opp&&fam(opp)?'<small>'+esc(husnavn(fam(opp)))+" vil bytte</small>":"")+"</div>"+
+        (dt>=today()?'<button class="btn ghost row" data-act="take" data-d="'+dt+'" data-i="'+i+
+          '" data-felt="'+(delt?felt:"")+'">Jeg tar den</button>':"")+
         "</div>";
     }
-    const hus=fam(sl.familyId), person=vaktPerson(dt,sl.familyId);
+    const hus=ansvarlig, person=vaktPerson(dt,hus.id);
     const minHus=!!(minF&&hus&&minF.id===hus.id);
     if(person){
       return '<div class="vakt"><div class="nv">'+esc(person.name.split(" ")[0])+
-        '<small>følger '+esc(husnavn(hus))+"</small></div>"+
+        '<small>følger '+esc(husnavn(hus))+bare+"</small></div>"+
         (person.id===ME?'<span class="tag you">det er deg</span>':ringEn(person.name.split(" ")[0],tlfFor(person,hus)))+
         (minHus&&person.id!==ME&&dt>=today()
           ? '<button class="btn ghost row" data-act="detErMeg" data-d="'+dt+'" data-h="'+hus.id+'">Det er meg</button>':"")+
         "</div>";
     }
     return '<div class="vakt"><div class="nv">'+esc(husnavn(hus))+
-      '<small>'+esc(voksne(hus))+", ikke sagt hvem som går</small></div>"+
+      '<small>'+esc(voksne(hus))+bare+", ikke sagt hvem som går</small></div>"+
       (minHus&&dt>=today()
         ? '<button class="btn ghost row" data-act="detErMeg" data-d="'+dt+'" data-h="'+hus.id+'">Det er meg</button>'
         : ringKort(hus))+"</div>";
@@ -799,7 +922,7 @@ function kortMineBarn(dt,fs){
 }
 
 function fasenMorgen(dt){
-  const t=DATA.term.meetTime||"08:15", kryss=kanKrysse(dt);
+  const t=DATA.term.meetTime||"08:15", kryss=kanKrysse(dt,"morgen");
   const med=medIDag(dt), utenfor=ikkeMedIDag(dt);
   /* Tallet først. Det er det man trenger å vite når man står på perrongen. */
   let h='<div class="sheet"><div class="eyebrow">Om morgenen</div>'+
@@ -837,7 +960,7 @@ function fasenMorgen(dt){
 }
 
 function fasenHjem(dt){
-  const d=dagPost(dt), bane=d&&d.bane, kryss=kanKrysse(dt), t=DATA.term;
+  const d=dagPost(dt), bane=d&&d.bane, kryss=kanKrysse(dt,"hjem"), t=DATA.term;
   let h='<div class="sheet"><div class="eyebrow">Banen hjem</div>';
   if(bane){
     h+='<div class="stort">Banen '+esc(bane)+"</div>"+
@@ -879,7 +1002,7 @@ function fasenHjem(dt){
       h+='<div class="avmeldt"><b>'+esc(k.name)+"</b><span>skal ikke hentes"+
         (st.notat?" · "+esc(st.notat):"")+"</span></div>";});
   }
-  if(!kryss)h+='<p class="hint" style="margin:14px 0 0">Det er de to på vakt som krysser av her.</p>';
+  if(!kryss)h+='<p class="hint" style="margin:14px 0 0">Det er de som har hentingen i dag som krysser av her.</p>';
   h+="</div>";
   if(d&&d.logg&&d.logg.length){
     h+='<div class="sheet"><div class="eyebrow">I dag</div>';
@@ -902,7 +1025,7 @@ function viewHenting(){
     h+='<p class="center">'+(f?esc(f.label):"Ingen følgegruppe denne dagen")+"</p></div></div>";
     return h;
   }
-  h+='<div style="margin-top:10px">'+blokkVakt(dt)+"</div></div>";
+  h+='<div style="margin-top:10px">'+blokkVakt(dt,fase(dt))+"</div></div>";
   const fs=fase(dt);
   h+='<div class="faser">'+
     '<button data-act="hfase" data-f="morgen" aria-current="'+(fs==="morgen")+'">Morgen</button>'+
@@ -1242,17 +1365,21 @@ function ukeTekst(){
     if(f){out+=DAGK[dow(dt)]+" "+kort(dt)+" "+f.label+"\n";continue;}
     const ps=plasser(dt);
     if(!ps.length)continue;
-    const hus=plassHus(dt).filter(Boolean).map(x=>husnavn(x)+" ("+voksne(x)+")");
-    const led=ledige(dt);
-    out+=DAGK[dow(dt)]+" "+kort(dt)+" "+(hus.length?hus.join(" + "):"")+
-      (led?(hus.length?" + ":"")+"MANGLER "+led+" VOKSEN":"")+"\n";}
+    /* En delt dag skrives som to biter, så gruppa ser hvem som gjør hva. */
+    const biter=[];
+    ps.forEach((sl,i)=>{
+      const vis=x=>x?husnavn(x)+" ("+voksne(x)+")":"MANGLER VOKSEN";
+      if(!erDelt(dt,i)){biter.push(vis(sl.familyId?fam(sl.familyId):null));return;}
+      FASER.forEach(([k,navn])=>biter.push(navn+": "+vis(ansvar(dt,i,k))));
+    });
+    out+=DAGK[dow(dt)]+" "+kort(dt)+" "+biter.join(" + ")+"\n";}
   return out.includes("\n",out.indexOf("\n")+1)?out:out+"Ingen skoledager denne uka.\n";
 }
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-act]");if(!b)return;
   const a=b.dataset.act;
   try{if(window.spor)window.spor(a,sporDetalj(b,a));}catch(e){}  // uten await, og kan ikke velte handlingen
-  if(a==="tab"){TAB=b.dataset.t;WEEKOFF=0;render();window.scrollTo(0,0);return;}
+  if(a==="tab"){TAB=b.dataset.t;WEEKOFF=0;BYTTE=null;render();window.scrollTo(0,0);return;}
   if(a==="week"){WEEKOFF+=+b.dataset.v;render();return;}
   if(a==="me"){setMe(b.dataset.id);TAB="hjem";return;}
   if(a==="switch"){ME=null;TAB="innst";try{await window.storage.delete(MEKEY,false);}catch(err){}
@@ -1356,7 +1483,7 @@ document.addEventListener("click",async e=>{
       /* De nærmeste dagene skyves ikke over på andre bak deres rygg, de legges ut for bytte. */
       skoledager().filter(dt=>dt>=today()&&dt<grense).forEach(dt=>{
         ((s.plan[dt]||{}).slots||[]).forEach(sl=>{
-          if(sl.familyId===fid){sl.original=sl.original||fid;sl.familyId=null;ute++;}});
+          if(leggUt(sl,fid,null).length)ute++;});   // halve vakter legges ut som halve
       });
       regenFuture(s,husnavn(f)+" ble meldt av, og har "+ute+" dager ute for bytte",grense);});
     toast(ute?"Meldt av. "+ute+" dager før "+kort(grense)+" ligger nå ute for bytte."
@@ -1416,7 +1543,7 @@ document.addEventListener("click",async e=>{
     toast("Du står som den som går");return;}
   if(a==="bane"){
     const dt=b.dataset.d, tid=b.dataset.t;
-    if(!kanKrysse(dt)){toast("Det er de på vakt som setter banetid");return;}
+    if(!kanKrysse(dt,"hjem")){toast("Det er den som har hentingen som setter banetid");return;}
     const nm=meName();
     await mutate(s=>{const d=iDag(s,dt);
       if(tid){d.bane=tid;dagLogg(s,dt,nm+" satte banen til "+tid);}
@@ -1424,7 +1551,7 @@ document.addEventListener("click",async e=>{
     toast(tid?"Banen er satt til "+tid+", hjemme "+ankomst(tid):"Banetiden er fjernet");return;}
   if(a==="pm"){
     const dt=b.dataset.d, kid=b.dataset.k;
-    if(!kanKrysse(dt)){toast("Det er de på vakt som krysser av");return;}
+    if(!kanKrysse(dt,"hjem")){toast("Det er den som har hentingen som krysser av");return;}
     const navn=(alleBarn().find(k=>k.id===kid)||{}).name||"Barnet";
     let av=false;
     await mutate(s=>{const d=iDag(s,dt);const bs=d.barn[kid]=d.barn[kid]||{};
@@ -1433,7 +1560,7 @@ document.addEventListener("click",async e=>{
     return;}
   if(a==="meldav"){
     const dt=b.dataset.d, kid=b.dataset.k, felt=b.dataset.felt;
-    if(!erMinBarn(kid)&&!kanKrysse(dt)){toast("Du kan bare melde av dine egne barn");return;}
+    if(!erMinBarn(kid)&&!kanKrysseNoe(dt)){toast("Du kan bare melde av dine egne barn");return;}
     const navn=(alleBarn().find(k=>k.id===kid)||{}).name||"Barnet";
     const nm=meName();
     let tekst="";
@@ -1451,7 +1578,7 @@ document.addEventListener("click",async e=>{
     toast(tekst);return;}
   if(a==="motteikke"){
     const dt=b.dataset.d, kid=b.dataset.k;
-    if(!kanKrysse(dt)){toast("Det er de på vakt som teller barna");return;}
+    if(!kanKrysse(dt,"morgen")){toast("Det er den som har leveringen som teller barna");return;}
     const navn=(alleBarn().find(k=>k.id===kid)||{}).name||"Barnet";
     let av=false;
     await mutate(s=>{const d=iDag(s,dt);const bs=d.barn[kid]=d.barn[kid]||{};
@@ -1461,7 +1588,7 @@ document.addEventListener("click",async e=>{
     toast(av?navn+" er ikke med":navn+" er med igjen");return;}
   if(a==="notat"){
     const dt=b.dataset.d, kid=b.dataset.k;
-    if(!erMinBarn(kid)&&!kanKrysse(dt)){toast("Du kan bare skrive beskjed for dine egne barn");return;}
+    if(!erMinBarn(kid)&&!kanKrysseNoe(dt)){toast("Du kan bare skrive beskjed for dine egne barn");return;}
     const el=document.getElementById("notat-"+kid);
     const txt=el?el.value.trim():"";
     const navn=(alleBarn().find(k=>k.id===kid)||{}).name||"Barnet";
@@ -1470,34 +1597,56 @@ document.addEventListener("click",async e=>{
       else{delete bs.notat;dagLogg(s,dt,"Beskjeden om "+navn+" er fjernet");}});
     toast(txt?"Beskjeden er lagret":"Beskjeden er fjernet");return;}
   if(a==="ics"){const dt=b.dataset.d;
-    downloadICS("folgegruppe_"+dt+".ics",[icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))]);
+    downloadICS("folgegruppe_"+dt+".ics",icsForDag(dt));
     toast("Kalenderfil lastet ned");return;}
   if(a==="icsall"){
     const days=skoledager().filter(dt=>dt>=today()&&isMine(dt));
     if(!days.length){toast("Du har ingen dager igjen denne terminen");return;}
-    downloadICS("folgegruppe_dine_dager.ics",days.map(dt=>icsEvent(dt,"Følgegruppa: din tur til å levere",icsMed(dt))));
+    downloadICS("folgegruppe_dine_dager.ics",days.flatMap(dt=>icsForDag(dt)));
     toast(days.length+" dager lagt i kalenderfilen");return;}
   if(a==="gen"){
     if(!b.dataset.sure){b.dataset.sure="1";b.textContent="Trykk igjen for å bekrefte";return;}
     await mutate(s=>{s.order=[];generer(s);});toast("Dagene er fordelt");return;}
+  if(a==="byttemeny"){
+    const nokkel=b.dataset.d+"|"+b.dataset.i;
+    BYTTE=BYTTE===nokkel?null:nokkel;render();return;}
+  if(a==="byttelukk"){BYTTE=null;render();return;}
   if(a==="drop"){
-    const dt=b.dataset.d;
-    const i=b.dataset.i!==undefined?+b.dataset.i:minPlass(dt);
-    if(i<0)return;
-    await mutate(s=>{const ps=(s.plan[dt]||{}).slots||[];const sl=ps[i];if(!sl||!sl.familyId)return;
-      const f=s.families.find(x=>x.id===sl.familyId);
-      sl.original=sl.original||sl.familyId;sl.familyId=null;
-      s.log.unshift({ts:Date.now(),text:(f?husnavn(f):"Noen")+" vil bytte bort "+lang(dt)});});
-    toast("Plassen er lagt ut for bytte. Nå kan andre ta den.");return;}
+    const dt=b.dataset.d, felt=b.dataset.felt||null, f=myFam();
+    const i=b.dataset.i!==undefined&&b.dataset.i!==""?+b.dataset.i:minPlass(dt);
+    if(i<0||!f)return;
+    BYTTE=null;
+    let ut=[];
+    await mutate(s=>{const sl=((s.plan[dt]||{}).slots||[])[i];if(!sl)return;
+      ut=leggUt(sl,f.id,felt);
+      if(!ut.length)return;
+      forenkle(sl);
+      s.log.unshift({ts:Date.now(),text:husnavn(f)+" vil bytte bort "+
+        (ut.length===2?"":fasenavn(ut[0],true)+" ")+lang(dt)});});
+    toast(!ut.length?"Du står ikke oppført her"
+      :ut.length===2?"Dagen er lagt ut for bytte. Nå kan andre ta den."
+      :stor(fasenavn(ut[0],true))+" er lagt ut for bytte. Du har fortsatt resten av dagen.");return;}
   if(a==="take"){
-    const dt=b.dataset.d, f=myFam();if(!f)return;
+    const dt=b.dataset.d, felt=b.dataset.felt||null, f=myFam();if(!f)return;
+    /* Man kan ikke gå to steder samtidig, men godt ta hentingen en dag man har leveringen. */
     const nok=DATA.families.filter(x=>x.active!==false).length>=perDag();
-    if(nok&&plasser(dt).some(sl=>sl.familyId===f.id)){toast("Du står alt oppført denne dagen");return;}
-    const i=b.dataset.i!==undefined?+b.dataset.i:plasser(dt).findIndex(sl=>!sl.familyId);
-    if(i<0)return;
-    await mutate(s=>{const ps=(s.plan[dt]||{}).slots||[];const sl=ps[i];if(!sl||sl.familyId)return;
-      sl.familyId=f.id;s.log.unshift({ts:Date.now(),text:husnavn(f)+" tar "+lang(dt)});});
-    toast("Du står nå oppført "+lang(dt));return;}
+    const opptatt=(felt?[felt]:FELT).filter(k=>plasser(dt).some((sl,j)=>ansvarId(dt,j,k)===f.id));
+    if(nok&&opptatt.length){
+      toast(opptatt.length===2?"Du står alt oppført denne dagen"
+        :"Du har alt "+fasenavn(opptatt[0],true)+" denne dagen");return;}
+    const hullene=hull(dt);
+    const treff=b.dataset.i!==undefined&&b.dataset.i!==""
+      ? hullene.find(x=>x.i===+b.dataset.i&&(x.felt||null)===felt) : hullene[0];
+    if(!treff){toast("Den er alt tatt");return;}
+    const i=treff.i;
+    await mutate(s=>{const sl=((s.plan[dt]||{}).slots||[])[i];if(!sl)return;
+      if(!felt){if(sl.familyId)return;sl.familyId=f.id;}
+      else{if(ansvarId(dt,i,felt))return;
+        const opp=oppriId(dt,i,felt);
+        sl[felt]=opp?{familyId:f.id,original:opp}:{familyId:f.id};}
+      forenkle(sl);
+      s.log.unshift({ts:Date.now(),text:husnavn(f)+" tar "+(felt?fasenavn(felt,true)+" ":"")+lang(dt)});});
+    toast("Du står nå oppført "+(felt?fasenavn(felt,true)+" ":"")+lang(dt));return;}
 });
 
 (async()=>{

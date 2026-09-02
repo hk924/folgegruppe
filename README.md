@@ -62,6 +62,27 @@ Grupper som ble satt opp før dette har ingen administrator. Da er alle
 administrator, som før, og den som styrer gruppa kan ta rollen under
 Innstillinger, Deg.
 
+## Halve vakter
+
+Én dag er én tur til skolen og én tur hjem. Det som oftest må byttes er bare
+den ene, og det gjør man på dagen: **Vil bytte** gir tre valg, hele dagen,
+bare leveringen eller bare hentingen. Det som legges ut kan tas av hvem som
+helst, med **Jeg tar hentingen**, akkurat som hele dager alltid har kunnet.
+
+Rulleringen går fortsatt på hele dager. Bytter du bort hentingen din, står
+dagen fortsatt på deg i fordelingen, så det finnes ikke noe halvdagsregnskap.
+Hvert bytte havner i loggen, og det er der man ser om noen bytter bort samme
+halvdel hver gang.
+
+Knappene følger halvdelen: den som har leveringen teller barna på perrongen,
+den som har hentingen setter banetid og krysser hentelista. Har du bare
+leveringen, får du ikke banetidsknappene, og appen sier hvem som har dem.
+
+En dag som ikke er delt ser ut og oppfører seg presis som før, med én linje.
+Bare delte dager vises som to, med `levering` og `henting` foran navnet. Det
+samme gjelder ukeplanen du limer i chatten, og kalenderfila, der en henting
+legges på første banetid i stedet for på perrongtiden om morgenen.
+
 ## Bruksmåling
 
 `supabase_hendelser.sql` kjøres én gang i SQL Editor. Den lager tabellen `hendelser`,
