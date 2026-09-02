@@ -83,9 +83,17 @@ a{color:var(--kobolt)}
 .day .who small{display:block;font-size:12px;color:var(--ink-soft)}
 .day.mine{background:rgba(216,162,43,.13);border-radius:10px;padding-left:10px;padding-right:10px}
 .slots{flex:1;min-width:0}
-.slot{display:flex;align-items:center;gap:10px;min-width:0}
+.slot{display:flex;align-items:center;gap:8px 10px;min-width:0;flex-wrap:wrap}
 .slot+.slot{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .slot.open .who{color:var(--rust)}
+/* Navnet og merkelappen hører sammen på én linje. Knappene er en egen gruppe, som
+   tar linja under når den ikke får plass ved siden av, og da står de side om side.
+   Uten dette klemmes navnet ned til én stavelse per linje, og en sentrert knapp som
+   krympes under innholdet flyter utover kanten og legger seg oppå teksten. */
+.slot .hode{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:min(100%,140px)}
+.slot .hode .who{flex:1 1 auto;min-width:0}
+.slot .handling{display:flex;gap:8px;flex-wrap:wrap;flex:0 1 auto}
+.slot .handling .btn.row{flex:0 0 auto;min-height:38px;padding:7px 12px;font-size:13px}
 /* liten merkelapp foran navnet når dagen er delt i levering og henting */
 .who .halv{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
   color:var(--ink-soft);font-weight:600;margin-right:6px}
@@ -143,7 +151,9 @@ textarea{min-height:150px;line-height:1.5}
 .btn.here{background:var(--kobolt);border-color:var(--kobolt);color:#fff}
 
 /* hvem som går i dag, én blokk per plass */
-.vakt{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+.vakt{display:flex;align-items:center;gap:8px 10px;padding:11px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.vakt .nv{flex:1 1 auto;min-width:min(100%,148px)}
+.vakt .tag,.vakt .btn.row{flex:0 0 auto}
 .vakt:first-of-type{border-top:0}
 .vakt .nv{flex:1;min-width:0;font-size:15px;font-weight:600}
 .vakt .nv small{display:block;font-size:12px;color:var(--ink-soft);font-weight:400}
@@ -208,7 +218,7 @@ a.btn{text-decoration:none;display:inline-flex}
 /* Byggmerke. Endres ved hver deploy, og er det appen kjenner seg selv igjen på.
    Det må ligge i fila selv, ikke hentes, ellers kan en app som kjører fra cache
    tro at den er ny fordi serveren svarer nytt. */
-const BYGG = "2026-09-02-1";
+const BYGG = "2026-09-02-2";
 
 const SUPABASE_URL = "https://cdbazglchnghywskgiel.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkYmF6Z2xjaG5naHl3c2tnaWVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5OTA0MjMsImV4cCI6MjEwMjU2NjQyM30.0KUA4LWLbCV_IgcDfvnmXDuq28W3MEloEA-kQNOVfH0";
@@ -746,7 +756,9 @@ function slotLinje(dt,i,felt,past,ctx){
         ?'<small>'+esc(husnavn(fam(opp)))+" vil bytte</small>":"");
   const naer=dt<=add(today(),1);            // ringeknapp bare når det er nå det gjelder
   const call=(!past&&naer&&!mine&&family&&ctx!=="flat")?ringKort(family):"";
-  return '<div class="slot'+(family?"":" open")+'"><div class="who">'+who+"</div>"+tag+call+act+"</div>";
+  return '<div class="slot'+(family?"":" open")+'">'+
+    '<div class="hode"><div class="who">'+who+"</div>"+tag+"</div>"+
+    (call||act?'<div class="handling">'+call+act+"</div>":"")+"</div>";
 }
 /* De tre valgene, som brikker under dagen. Bare synlig for den som nettopp trykket «Vil bytte». */
 function byttebrikker(dt,i){
